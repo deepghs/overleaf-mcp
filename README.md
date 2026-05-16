@@ -83,7 +83,10 @@ ol-mcp authenticates with a session cookie pasted from your browser. The CSRF to
 | `open_project` | Joins a project's real-time session and caches its file tree. Reports whether track-changes is on for your user. |
 | `list_files` | Lists the file tree of the open project (cached, no network). Filter by `kind` and `path_contains`. |
 | `read_file` | Reads a doc (returns text + OT version + a summary of tracked changes / comments) or a binary file (base64 + MIME). |
-| `edit_file` | Replaces a doc's contents. Computes a minimal diff via `diff-match-patch`, submits it as an OT operation, and adds `meta.tc` when track-changes is on so the edit appears as a pending suggestion in the Review panel. Pass `track: "on" \| "off" \| "auto"` to override. |
+| `edit_file` | Replaces a doc's contents. Computes a minimal diff via `diff-match-patch`, submits it as an OT operation, and adds `meta.tc` so the edit lands as a pending suggestion in the Review panel by default. Pass `track: "off"` to write directly (no tracking) or `track: "auto"` to honor the project's track-changes setting. |
+| `list_tracked_changes` | Enumerates every pending tracked-change suggestion across the open project, with author name + email, doc path, op kind (insert/delete), position, op text, change_id. Filter by `author_email`, `author_id_endswith`, `path_contains`, `kind`, `text_contains`, `limit`. |
+| `accept_changes` | Accepts one or more tracked changes by `change_id` (from `list_tracked_changes`). Multi-doc groups are batched automatically. Irreversible. |
+| `reject_changes` | Rejects one or more tracked changes by `change_id`. Implemented as `applyOtUpdate` with the inverse op + `u:true` (same pathway Overleaf's web client uses). Irreversible. |
 | `compile` | Triggers an Overleaf compile and returns status + output-file list. Pass `root_doc`, `draft`, `stop_on_first_error` to control. |
 | `read_log` | Returns `output.log` from the most recent compile, with `!`-prefixed error lines surfaced at the top. |
 | `list_comments` | Lists review-panel comment threads with doc path, quoted text, author, latest-message preview. Supports `include_resolved`, `path_contains`, `full`. |
@@ -96,6 +99,7 @@ ol-mcp authenticates with a session cookie pasted from your browser. The CSRF to
 
 Things to ask Claude once `ol-mcp` is connected:
 
+- _"Accept every pending tracked change by John Doe that's only adjusting punctuation or whitespace."_ — uses `list_tracked_changes(author_email: "...")` → LLM filters by op text → `accept_changes(...)`.
 - _"List my recent Overleaf projects."_
 - _"Open my thesis project and show me what comments my supervisor has left."_
 - _"Read intro.tex and fix the missing comma in the second paragraph."_  → with track-changes on, this lands as a tracked suggestion.

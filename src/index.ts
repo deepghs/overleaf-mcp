@@ -9,6 +9,7 @@ import { registerReadFile } from "./tools/readFile.js";
 import { registerEditFile } from "./tools/editFile.js";
 import { registerCompile, registerReadLog } from "./tools/compile.js";
 import { registerComments } from "./tools/comments.js";
+import { registerTrackedChanges } from "./tools/trackedChanges.js";
 import { close as closeActiveProject } from "./session/activeProject.js";
 import { logger } from "./util/logger.js";
 
@@ -53,6 +54,7 @@ async function main(): Promise<void> {
   registerCompile(server);
   registerReadLog(server);
   registerComments(server);
+  registerTrackedChanges(server);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
