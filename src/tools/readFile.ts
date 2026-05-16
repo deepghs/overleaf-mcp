@@ -4,6 +4,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { joinDoc } from "../api/socket.js";
 import { olGet, expectOk } from "../api/http.js";
 import { findByPath, getActiveProject } from "../session/activeProject.js";
+import { updateDoc } from "../session/docCache.js";
 import { logger } from "../util/logger.js";
 
 const Schema = z.object({
@@ -72,6 +73,12 @@ export function registerReadFile(server: McpServer): void {
         if (entity.kind === "doc") {
           const doc = await joinDoc(entity.id);
           const text = doc.docLines.join("\n");
+          // Pin the doc cache to exactly what the agent just saw, so a later
+          // edit_file uses the same baseline. If the server has moved on
+          // (concurrent edit) between read and edit, the resulting op will be
+          // sent with a stale `v` and the server will reject or transform —
+          // either is correct behavior, but we no longer silently overwrite.
+          updateDoc(entity.id, text, doc.version);
           const ranges = doc.ranges as { changes?: unknown[]; comments?: unknown[] } | undefined | null;
           const changeCount = Array.isArray(ranges?.changes) ? ranges.changes.length : 0;
           const commentCount = Array.isArray(ranges?.comments) ? ranges.comments.length : 0;

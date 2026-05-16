@@ -24,9 +24,9 @@ const Schema = z.object({
     .describe("Optional safety check. If provided and the doc's current version differs, the edit is rejected."),
   track: z
     .enum(["auto", "on", "off"])
-    .default("auto")
+    .default("on")
     .describe(
-      "Tracked-changes mode. 'auto' (default) tracks edits when the project has track-changes enabled for this user, otherwise writes directly. 'on' forces tracked changes regardless. 'off' forces a direct edit even if track-changes is enabled.",
+      "Tracked-changes mode. Default is 'on' — every edit lands as a pending suggestion in Overleaf's Review panel, which is what collaborators expect for an agent. Set 'off' explicitly to make a direct (untracked) edit. 'auto' tracks only when the project has track-changes enabled for this user.",
     ),
 });
 
