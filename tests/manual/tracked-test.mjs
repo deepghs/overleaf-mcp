@@ -4,7 +4,8 @@
 // ranges metadata, which should grow by one change entry.
 //
 // Usage:
-//   OL_COOKIE='...' node tests/manual/tracked-test.mjs <project_id> <doc_path>
+//   node tests/manual/tracked-test.mjs <project_id> <doc_path>
+// (login first via `node dist/index.js login` so a cookie file exists.)
 
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";

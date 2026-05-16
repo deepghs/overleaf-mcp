@@ -4,9 +4,10 @@
 // session.
 //
 // Usage:
-//   OL_COOKIE='...' node tests/manual/sequence.mjs <project_id> [doc_path]
-//   OL_COOKIE='...' node tests/manual/sequence.mjs 61d853bcbf1003100e957034
-//   OL_COOKIE='...' node tests/manual/sequence.mjs 61d853bcbf1003100e957034 main.tex
+//   node tests/manual/sequence.mjs <project_id> [doc_path]
+//   node tests/manual/sequence.mjs 61d853bcbf1003100e957034
+//   node tests/manual/sequence.mjs 61d853bcbf1003100e957034 main.tex
+// (login first via `node dist/index.js login` so a cookie file exists.)
 
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";

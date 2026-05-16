@@ -2,7 +2,8 @@
 // Phase 5 test: open_project -> compile -> read_log.
 //
 // Usage:
-//   OL_COOKIE='...' node tests/manual/compile-test.mjs <project_id>
+//   node tests/manual/compile-test.mjs <project_id>
+// (login first via `node dist/index.js login` so a cookie file exists.)
 
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";

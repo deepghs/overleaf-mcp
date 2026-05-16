@@ -4,7 +4,8 @@
 // now-stale cached version. Observe whether the server transforms B's op,
 // rejects it, or corrupts the doc.
 //
-// Usage: OL_COOKIE='...' node tests/manual/stale-version.mjs <project_id> <doc_path>
+// Usage: node tests/manual/stale-version.mjs <project_id> <doc_path>
+// (login first via `node dist/index.js login` so a cookie file exists.)
 
 import { spawnMcp } from "./_mcp-client.mjs";
 

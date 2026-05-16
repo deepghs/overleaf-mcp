@@ -30,11 +30,11 @@ Tools (16): `ping`, `list_projects`, `open_project`, `list_files`, `read_file`, 
 
 ## Auth & running
 
-`OL_COOKIE` is the only required env var (cookie pasted from browser DevTools). `OL_BASE_URL` defaults to `https://www.overleaf.com`; override for self-hosted CE. `OL_CSRF` is optional (auto-discovered from `/project` HTML's `ol-csrfToken` meta).
+Cookie capture is via a dedicated headless-ish Chrome profile, driven over the Chrome DevTools Protocol — `node dist/index.js login` opens a window pointing at `<OL_BASE_URL>/project`, user logs in normally (captcha / Google OAuth / ORCID / institutional SSO / 2FA all work because it's a real Chrome), cookie is read via `Network.getCookies` once the dashboard loads, persisted to `<configDir>/overleaf-mcp/cookie.json` (mode 0600). The same flow auto-triggers when a tool call hits a 302→/login or 401/403. Dedicated profile means we never touch the user's real Chrome and never trigger a macOS Keychain prompt for it. `OL_BASE_URL` defaults to `https://www.overleaf.com`; `OL_BROWSER` overrides the Chrome binary path; `OL_INSECURE=1` adds `--ignore-certificate-errors` for self-hosted CE with self-signed certs; `OL_CSRF` is optional (auto-discovered from `/project` HTML's `ol-csrfToken` meta).
 
 ## Tests
 
-`tests/manual/*.mjs` are end-to-end smoke + edge-case scripts. They spawn the built `dist/index.js` as a child process and drive it over stdio. None require CI infra; all need `OL_COOKIE` env. Highlights:
+`tests/manual/*.mjs` are end-to-end smoke + edge-case scripts. They spawn the built `dist/index.js` as a child process and drive it over stdio. None require CI infra; all need a cookie file (run `node dist/index.js login` first). Highlights:
 
 - `smoke.mjs <tool>` — single-tool invocation
 - `sequence.mjs <project> [doc]` — open→list→read flow

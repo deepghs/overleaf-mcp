@@ -2,7 +2,8 @@
 // Edge T4 — compile fail + auto-fix loop. Forces a LaTeX error via a direct
 // (untracked) edit so the compile actually breaks, reads the log, then reverts.
 //
-// Usage: OL_COOKIE='...' node tests/manual/compile-fix.mjs <project_id> <doc_path>
+// Usage: node tests/manual/compile-fix.mjs <project_id> <doc_path>
+// (login first via `node dist/index.js login` so a cookie file exists.)
 
 import { spawnMcp } from "./_mcp-client.mjs";
 
