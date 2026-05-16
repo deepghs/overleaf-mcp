@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.log
+.env
+.env.local
+.DS_Store
+.tsbuildinfo
+*.tsbuildinfo
+coverage/
+
+# Quarto preview artifacts (when README.md is rendered locally)
+README.html
+*_files/
+.quarto/
