@@ -1,78 +1,23 @@
 # overleaf-mcp
 
-An MCP server for [Overleaf](https://www.overleaf.com) that lets a Claude agent navigate projects, read/edit `.tex` files, compile, and work with review-panel comments — over Overleaf's **real, reverse-engineered web/Socket.IO API**, the same channel the official web editor uses.
+An MCP server for [Overleaf](https://www.overleaf.com) that lets a Claude or other agent navigate projects, read/edit `.tex` files, compile, and work with review-panel comments — over Overleaf's **real web/Socket.IO API**, the same channel the official web editor uses.
 
-The one feature no existing Overleaf MCP can deliver: when a project has **track-changes** enabled, the agent's edits appear as **pending suggestions in the Review panel**, the same way a human collaborator's edits do. Your supervisor can accept or reject each suggestion.
+The one feature no existing Overleaf MCP can deliver: when a project has **track-changes** enabled, the agent's edits appear as **pending suggestions in the Review panel**, the same way a human collaborator's edits do. You and your collaborators can accept or reject each suggestion. You can also ask the agend to accept/reject them (e.g. *"accept all suggestions about typos"*).
 
 ## Why a new MCP
 
-The three existing Overleaf MCPs ([mjyoo2/overleafmcp](https://github.com/mjyoo2/overleafmcp), [YounesBensafia/overleaf-mcp-server](https://github.com/YounesBensafia/overleaf-mcp-server), [GhoshSrinjoy/Overleaf-mcp](https://github.com/GhoshSrinjoy/Overleaf-mcp)) all write through Overleaf's **Git bridge**, which has two crippling problems for collaborative academic work:
+The three existing Overleaf MCPs ([mjyoo2/overleafmcp](https://github.com/mjyoo2/overleafmcp), [YounesBensafia/overleaf-mcp-server](https://github.com/YounesBensafia/overleaf-mcp-server), [GhoshSrinjoy/Overleaf-mcp](https://github.com/GhoshSrinjoy/Overleaf-mcp)) all write through Overleaf's **Git bridge**, which has two problems for collaborative academic work:
 
 1. Commits show up in Overleaf with delay (the bridge polls).
 2. Git-bridge writes **bypass tracked changes entirely** — even when track-changes mode is on, edits land as direct overwrites, not as suggestions for review.
 
-The [`overleaf-workshop`](https://github.com/overleaf-workshop/overleaf-workshop) VSCode extension showed the way: speak Overleaf's real Socket.IO API instead of Git. But it doesn't yet emit tracked changes ([issue #94](https://github.com/overleaf-workshop/overleaf-workshop/issues/94)). And its published [`socket.io-client@0.9.17-overleaf-5`](https://github.com/overleaf/socket.io-client) fork has a subtle bug that makes it unusable against cloud Overleaf from a server-side caller — `extraHeaders` is silently dropped on both the XHR polling and WebSocket transports, so the session cookie never reaches the handshake.
+The [`overleaf-workshop`](https://github.com/overleaf-workshop/overleaf-workshop) VSCode extension already uses Overleaf's Socket.IO API rather than Git, but doesn't yet emit tracked changes ([issue #94](https://github.com/overleaf-workshop/overleaf-workshop/issues/94)).
 
-`overleaf-mcp` solves both: a minimal Socket.IO 0.9 client over `fetch` + `ws@8` (so cookies actually flow), plus the `meta.tc` ID seed on `applyOtUpdate` that flips Overleaf's server-side `RangesTracker` into track-changes mode.
+`overleaf-mcp` solves both: a minimal Socket.IO 0.9 client over `fetch` + `ws@8`, plus the `meta.tc` ID seed on `applyOtUpdate` that flips Overleaf's server-side `RangesTracker` into track-changes mode.
 
 ## Status
 
-Working end-to-end against `overleaf.com` — 13 tools, tracked-changes edits and review-panel comments both verified. Not yet on npm; install from source.
-
-## Requirements
-
-- Node ≥ 20
-- An Overleaf account (overleaf.com or self-hosted Community Edition)
-
-## Quick start
-
-```sh
-git clone <this-repo>
-cd overleaf-mcp
-npm install
-npm run build
-```
-
-Then add to your Claude Desktop / Claude Code MCP config:
-
-```json
-{
-  "mcpServers": {
-    "overleaf": {
-      "command": "node",
-      "args": ["/absolute/path/to/overleaf-mcp/dist/index.js"],
-      "env": {
-        "OL_BASE_URL": "https://www.overleaf.com",
-        "OL_COOKIE": "overleaf_session2=s%3A....; GCLB=..."
-      }
-    }
-  }
-}
-```
-
-For self-hosted Community Edition: set `OL_BASE_URL` to your server (e.g. `https://overleaf.mylab.edu`). Same cookie capture, same tools.
-
-## Authentication
-
-overleaf-mcp authenticates with a session cookie pasted from your browser. The CSRF token is auto-discovered from the `/project` page after login, so you don't need to copy it separately. (Set `OL_CSRF` only if your Overleaf instance doesn't expose the `ol-csrfToken` meta tag.)
-
-### Capturing the cookie
-
-1. Log into Overleaf in your browser.
-2. Open DevTools → **Application** (Chrome/Edge) or **Storage** (Firefox) → **Cookies** → `https://www.overleaf.com`.
-3. Copy the **value** of `overleaf_session2` — it starts with `s%3A` and is long. If a `GCLB` cookie is present (commonly on overleaf.com), copy that too.
-4. Combine them in one string with `; ` separators: `overleaf_session2=s%3A...; GCLB=...`. That's your `OL_COOKIE`.
-
-> ⚠️ The pasted session cookie grants full account access. Treat it like a password — do not commit it, share it, or paste it into shared configs. Cookies expire periodically; if you see auth errors, re-copy.
-
-### Environment variables
-
-| Var | Required | Default | Notes |
-|---|---|---|---|
-| `OL_COOKIE` | yes | — | Session cookie, see above. |
-| `OL_BASE_URL` | no | `https://www.overleaf.com` | Override for self-hosted Overleaf. |
-| `OL_CSRF` | no | auto-discovered | Force a specific CSRF token. Only needed if your server doesn't ship the `ol-csrfToken` meta tag. |
-| `OL_MCP_LOG_LEVEL` | no | `info` | `debug`, `info`, `warn`, `error`. Goes to stderr; stdout is reserved for MCP JSON-RPC. |
+Working end-to-end against `overleaf.com` — 16 tools, tracked-changes edits and review-panel comments both verified. Published on npm as [`@netique/overleaf-mcp`](https://www.npmjs.com/package/@netique/overleaf-mcp).
 
 ## Tools
 
@@ -101,10 +46,82 @@ Things to ask Claude once `overleaf-mcp` is connected:
 
 - _"Accept every pending tracked change by John Doe that's only adjusting punctuation or whitespace."_ — uses `list_tracked_changes(author_email: "...")` → LLM filters by op text → `accept_changes(...)`.
 - _"List my recent Overleaf projects."_
-- _"Open my thesis project and show me what comments my supervisor has left."_
+- _"Open my thesis project and show me what comments my collaborators have left."_
 - _"Read intro.tex and fix the missing comma in the second paragraph."_  → with track-changes on, this lands as a tracked suggestion.
 - _"Compile the project and tell me what the LaTeX errors mean."_  → uses `compile` then `read_log` automatically.
 - _"For each open comment thread, suggest a fix and reply with what you did."_  → end-to-end review workflow.
+
+## Requirements
+
+- Node ≥ 20
+- An Overleaf account (overleaf.com or self-hosted Community Edition)
+
+## Quick start
+
+No local install needed — `npx` fetches and runs the latest version. Add this to your Claude Desktop / Claude Code MCP config:
+
+```json
+{
+  "mcpServers": {
+    "overleaf": {
+      "command": "npx",
+      "args": ["-y", "@netique/overleaf-mcp"],
+      "env": {
+        "OL_BASE_URL": "https://www.overleaf.com",
+        "OL_COOKIE": "overleaf_session2=s%3A...."
+      }
+    }
+  }
+}
+```
+
+For self-hosted Community Edition: set `OL_BASE_URL` to your server (e.g. `https://overleaf.mylab.edu`). Same cookie capture, same tools.
+
+<details>
+<summary>From source (for development)</summary>
+
+```sh
+git clone https://github.com/netique/overleaf-mcp.git
+cd overleaf-mcp
+npm install
+npm run build
+```
+
+Then point your MCP config at the built file:
+
+```json
+{
+  "mcpServers": {
+    "overleaf": {
+      "command": "node",
+      "args": ["/absolute/path/to/overleaf-mcp/dist/index.js"],
+      "env": { "OL_COOKIE": "overleaf_session2=s%3A...." }
+    }
+  }
+}
+```
+</details>
+
+## Authentication
+
+overleaf-mcp authenticates with a session cookie pasted from your browser. The CSRF token is auto-discovered from the `/project` page after login, so you don't need to copy it separately. (Set `OL_CSRF` only if your Overleaf instance doesn't expose the `ol-csrfToken` meta tag.)
+
+### Capturing the cookie
+
+1. Log into Overleaf in your browser.
+2. Open DevTools → **Application** (Chrome/Edge) or **Storage** (Firefox) → **Cookies** → `https://www.overleaf.com`.
+3. Copy the **value** of `overleaf_session2` — it starts with `s%3A` and is long. That's your `OL_COOKIE` (format: `overleaf_session2=s%3A...`).
+
+> ⚠️ The pasted session cookie grants full account access. Treat it like a password — do not commit it, share it, or paste it into shared configs. Cookies expire periodically; if you see auth errors, re-copy.
+
+### Environment variables
+
+| Var | Required | Default | Notes |
+|---|---|---|---|
+| `OL_COOKIE` | yes | — | Session cookie, see above. |
+| `OL_BASE_URL` | no | `https://www.overleaf.com` | Override for self-hosted Overleaf. |
+| `OL_CSRF` | no | auto-discovered | Force a specific CSRF token. Only needed if your server doesn't ship the `ol-csrfToken` meta tag. |
+| `OL_MCP_LOG_LEVEL` | no | `info` | `debug`, `info`, `warn`, `error`. Goes to stderr; stdout is reserved for MCP JSON-RPC. |
 
 ## Troubleshooting
 
@@ -117,37 +134,6 @@ Things to ask Claude once `overleaf-mcp` is connected:
 **Edits land but don't show up as tracked suggestions** — confirm track-changes is on for *your user* on this project (Menu → Settings → Track Changes → "For me" or "For everyone"). `open_project` reports the detected state under `track_changes_on_for_me`. To force tracking regardless, pass `track: "on"` to `edit_file`.
 
 **Compile succeeds but `read_log` returns 404** — Overleaf needs `?clsiserverid=...` to route to the right CLSI worker; we add this automatically from the previous compile response. If you see this, the previous compile may not have completed; re-run `compile` and then `read_log`.
-
-## Architecture
-
-```
-src/
-├── index.ts                  MCP server + tool registration
-├── config.ts                 env var loading
-├── api/
-│   ├── http.ts               cookie + CSRF wrapper around fetch
-│   ├── socket.ts             custom Socket.IO 0.9 client (fetch handshake + ws@8 upgrade)
-│   ├── projectTypes.ts       ProjectEntity, FlatEntity, file-tree flattener
-│   ├── compileTypes.ts       compile response shape
-│   ├── commentTypes.ts       thread / message / range shapes
-│   ├── types.ts              project list shape
-│   └── errors.ts             OverleafAuthError, OverleafApiError
-├── session/
-│   ├── identity.ts           singleton: cookie -> userId/csrf/email via /project HTML scrape
-│   ├── activeProject.ts      currently-open project + file tree + last compile
-│   └── docCache.ts           per-doc text + OT version cache
-├── ot/
-│   ├── diff.ts               diff-match-patch -> ShareJS ops
-│   └── trackedChanges.ts     meta.tc ID seed (port of ranges-tracker generateIdSeed)
-└── tools/
-    ├── listProjects.ts
-    ├── openProject.ts
-    ├── listFiles.ts
-    ├── readFile.ts
-    ├── editFile.ts
-    ├── compile.ts
-    └── comments.ts
-```
 
 ## Acknowledgements
 

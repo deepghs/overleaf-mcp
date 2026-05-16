@@ -4,7 +4,7 @@ Context for Claude (or any future contributor) working in this repo. Read top to
 
 ## What this is
 
-`overleaf-mcp` is an MCP server for Overleaf. It speaks Overleaf's reverse-engineered Socket.IO web API (the same channel the official editor uses), **not** the Git bridge. The headline feature: edits land as **tracked changes** in Overleaf's Review panel — every other Overleaf MCP punts to the Git bridge and silently overwrites, which makes them unusable for collaborative academic work.
+`overleaf-mcp` is an MCP server for Overleaf. It speaks Overleaf's Socket.IO web API (the same channel the official editor uses), **not** the Git bridge. The headline feature: edits land as **tracked changes** in Overleaf's Review panel — every other Overleaf MCP punts to the Git bridge and silently overwrites, which makes them unusable for collaborative academic work.
 
 Tools (16): `ping`, `list_projects`, `open_project`, `list_files`, `read_file`, `edit_file`, `compile`, `read_log`, `list_comments`, `read_comment_thread`, `reply_comment`, `resolve_comment`, `reopen_comment`, `list_tracked_changes`, `accept_changes`, `reject_changes`.
 
@@ -47,7 +47,7 @@ Tools (16): `ping`, `list_projects`, `open_project`, `list_files`, `read_file`, 
 
 ## Things not to do without asking
 
-- Don't change `track: "on"` default — supervisors expect to review every agent edit.
+- Don't change `track: "on"` default — collaborators expect to review every agent edit.
 - Don't propose wrapper scripts for cookie discovery (e.g. pulling from VSCode storage at runtime) — the user explicitly wants the plaintext-in-config approach until a proper login flow is built.
 - Don't add code that bypasses tracked-changes when the project has them enabled.
 - Don't switch to the broken `socket.io-client@0.9-overleaf` fork.
