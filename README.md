@@ -15,6 +15,10 @@ The [`overleaf-workshop`](https://github.com/overleaf-workshop/overleaf-workshop
 
 `ol-mcp` solves both: a minimal Socket.IO 0.9 client over `fetch` + `ws@8` (so cookies actually flow), plus the `meta.tc` ID seed on `applyOtUpdate` that flips Overleaf's server-side `RangesTracker` into track-changes mode.
 
+## Status
+
+Working end-to-end against `overleaf.com` — 13 tools, tracked-changes edits and review-panel comments both verified. Not yet on npm; install from source.
+
 ## Requirements
 
 - Node ≥ 20
@@ -149,4 +153,10 @@ src/
 
 ## License
 
-MIT — see `LICENSE`.
+**AGPL-3.0-or-later** — see [`LICENSE`](./LICENSE).
+
+ol-mcp incorporates code ported from two AGPL-3.0 projects (overleaf-workshop and overleaf/overleaf — see Acknowledgements), so the combined work is distributed under the same terms. Practical implications:
+
+- You can use, study, and modify ol-mcp freely.
+- If you redistribute it, modified or not, recipients must also receive the source under AGPL-3.0.
+- If you run a **modified** version as a network service that users interact with, you must make the modified source available to those users. Running unmodified ol-mcp as your own personal MCP server is unaffected.
