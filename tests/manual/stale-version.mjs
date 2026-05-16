@@ -13,8 +13,8 @@ const docPath = process.argv[3] ?? "test.tex";
 if (!projectId) { console.error("usage: stale-version.mjs <project_id> [doc_path]"); process.exit(2); }
 
 const ts = new Date().toISOString();
-const markerA = `% ol-mcp T1 marker A @ ${ts}\n`;
-const markerB = `% ol-mcp T1 marker B @ ${ts}\n`;
+const markerA = `% overleaf-mcp T1 marker A @ ${ts}\n`;
+const markerB = `% overleaf-mcp T1 marker B @ ${ts}\n`;
 
 const a = spawnMcp({ label: "A" });
 const b = spawnMcp({ label: "B" });

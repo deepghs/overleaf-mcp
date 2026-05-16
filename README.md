@@ -1,4 +1,4 @@
-# ol-mcp
+# overleaf-mcp
 
 An MCP server for [Overleaf](https://www.overleaf.com) that lets a Claude agent navigate projects, read/edit `.tex` files, compile, and work with review-panel comments — over Overleaf's **real, reverse-engineered web/Socket.IO API**, the same channel the official web editor uses.
 
@@ -13,7 +13,7 @@ The three existing Overleaf MCPs ([mjyoo2/overleafmcp](https://github.com/mjyoo2
 
 The [`overleaf-workshop`](https://github.com/overleaf-workshop/overleaf-workshop) VSCode extension showed the way: speak Overleaf's real Socket.IO API instead of Git. But it doesn't yet emit tracked changes ([issue #94](https://github.com/overleaf-workshop/overleaf-workshop/issues/94)). And its published [`socket.io-client@0.9.17-overleaf-5`](https://github.com/overleaf/socket.io-client) fork has a subtle bug that makes it unusable against cloud Overleaf from a server-side caller — `extraHeaders` is silently dropped on both the XHR polling and WebSocket transports, so the session cookie never reaches the handshake.
 
-`ol-mcp` solves both: a minimal Socket.IO 0.9 client over `fetch` + `ws@8` (so cookies actually flow), plus the `meta.tc` ID seed on `applyOtUpdate` that flips Overleaf's server-side `RangesTracker` into track-changes mode.
+`overleaf-mcp` solves both: a minimal Socket.IO 0.9 client over `fetch` + `ws@8` (so cookies actually flow), plus the `meta.tc` ID seed on `applyOtUpdate` that flips Overleaf's server-side `RangesTracker` into track-changes mode.
 
 ## Status
 
@@ -28,7 +28,7 @@ Working end-to-end against `overleaf.com` — 13 tools, tracked-changes edits an
 
 ```sh
 git clone <this-repo>
-cd ol-mcp
+cd overleaf-mcp
 npm install
 npm run build
 ```
@@ -40,7 +40,7 @@ Then add to your Claude Desktop / Claude Code MCP config:
   "mcpServers": {
     "overleaf": {
       "command": "node",
-      "args": ["/absolute/path/to/ol-mcp/dist/index.js"],
+      "args": ["/absolute/path/to/overleaf-mcp/dist/index.js"],
       "env": {
         "OL_BASE_URL": "https://www.overleaf.com",
         "OL_COOKIE": "overleaf_session2=s%3A....; GCLB=..."
@@ -54,7 +54,7 @@ For self-hosted Community Edition: set `OL_BASE_URL` to your server (e.g. `https
 
 ## Authentication
 
-ol-mcp authenticates with a session cookie pasted from your browser. The CSRF token is auto-discovered from the `/project` page after login, so you don't need to copy it separately. (Set `OL_CSRF` only if your Overleaf instance doesn't expose the `ol-csrfToken` meta tag.)
+overleaf-mcp authenticates with a session cookie pasted from your browser. The CSRF token is auto-discovered from the `/project` page after login, so you don't need to copy it separately. (Set `OL_CSRF` only if your Overleaf instance doesn't expose the `ol-csrfToken` meta tag.)
 
 ### Capturing the cookie
 
@@ -97,7 +97,7 @@ ol-mcp authenticates with a session cookie pasted from your browser. The CSRF to
 
 ## Typical workflow
 
-Things to ask Claude once `ol-mcp` is connected:
+Things to ask Claude once `overleaf-mcp` is connected:
 
 - _"Accept every pending tracked change by John Doe that's only adjusting punctuation or whitespace."_ — uses `list_tracked_changes(author_email: "...")` → LLM filters by op text → `accept_changes(...)`.
 - _"List my recent Overleaf projects."_
@@ -159,8 +159,8 @@ src/
 
 **AGPL-3.0-or-later** — see [`LICENSE`](./LICENSE).
 
-ol-mcp incorporates code ported from two AGPL-3.0 projects (overleaf-workshop and overleaf/overleaf — see Acknowledgements), so the combined work is distributed under the same terms. Practical implications:
+overleaf-mcp incorporates code ported from two AGPL-3.0 projects (overleaf-workshop and overleaf/overleaf — see Acknowledgements), so the combined work is distributed under the same terms. Practical implications:
 
-- You can use, study, and modify ol-mcp freely.
+- You can use, study, and modify overleaf-mcp freely.
 - If you redistribute it, modified or not, recipients must also receive the source under AGPL-3.0.
-- If you run a **modified** version as a network service that users interact with, you must make the modified source available to those users. Running unmodified ol-mcp as your own personal MCP server is unaffected.
+- If you run a **modified** version as a network service that users interact with, you must make the modified source available to those users. Running unmodified overleaf-mcp as your own personal MCP server is unaffected.

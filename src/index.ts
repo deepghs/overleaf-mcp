@@ -13,7 +13,7 @@ import { registerTrackedChanges } from "./tools/trackedChanges.js";
 import { close as closeActiveProject } from "./session/activeProject.js";
 import { logger } from "./util/logger.js";
 
-const SERVER_NAME = "ol-mcp";
+const SERVER_NAME = "overleaf-mcp";
 const SERVER_VERSION = "0.1.0";
 
 const INSTRUCTIONS = [

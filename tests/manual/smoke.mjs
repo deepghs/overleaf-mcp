@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Manual smoke test for ol-mcp. Runs the server as a child process over stdio,
+// Manual smoke test for overleaf-mcp. Runs the server as a child process over stdio,
 // drives the MCP initialize handshake, and calls one tool.
 //
 // Usage:

@@ -12,3 +12,7 @@ coverage/
 README.html
 *_files/
 .quarto/
+
+# Claude Code per-project state (session transcripts, scratch settings).
+# Project conventions for Claude live in CLAUDE.md (which IS tracked).
+.claude/

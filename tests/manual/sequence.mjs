@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Drives a multi-step MCP tool sequence against the running ol-mcp server, so
+// Drives a multi-step MCP tool sequence against the running overleaf-mcp server, so
 // stateful flows (open_project -> list_files -> read_file) actually share a
 // session.
 //

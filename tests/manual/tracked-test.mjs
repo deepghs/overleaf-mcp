@@ -15,7 +15,7 @@ const SERVER = resolve(__dirname, "../../dist/index.js");
 
 const projectId = process.argv[2];
 const docPath = process.argv[3];
-const marker = `\n% ol-mcp TRACKED test @ ${new Date().toISOString()}\n`;
+const marker = `\n% overleaf-mcp TRACKED test @ ${new Date().toISOString()}\n`;
 if (!projectId || !docPath) {
   console.error("usage: tracked-test.mjs <project_id> <doc_path>");
   process.exit(2);

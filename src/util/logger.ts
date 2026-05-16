@@ -8,8 +8,8 @@ const threshold = LEVELS[(process.env.OL_MCP_LOG_LEVEL as Level) ?? "info"] ?? L
 function log(level: Level, msg: string, extra?: unknown): void {
   if (LEVELS[level] < threshold) return;
   const line = extra === undefined
-    ? `[ol-mcp ${level}] ${msg}`
-    : `[ol-mcp ${level}] ${msg} ${typeof extra === "string" ? extra : JSON.stringify(extra)}`;
+    ? `[overleaf-mcp ${level}] ${msg}`
+    : `[overleaf-mcp ${level}] ${msg} ${typeof extra === "string" ? extra : JSON.stringify(extra)}`;
   process.stderr.write(line + "\n");
 }
 

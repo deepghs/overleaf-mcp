@@ -126,7 +126,7 @@ async function rejectViaOt(docId: string, changes: FlatChange[]): Promise<void> 
     op: ops,
     v: fresh.version,
     meta: {
-      source: sock?.publicId ?? "ol-mcp",
+      source: sock?.publicId ?? "overleaf-mcp",
       ts: Date.now(),
       user_id: identity.userId,
       tc: generateIdSeed(),

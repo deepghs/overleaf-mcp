@@ -10,8 +10,8 @@ const docPath = process.argv[3] ?? "NRM.tex";
 if (!projectId) { console.error("usage: multiop-edit.mjs <project_id> [doc_path]"); process.exit(2); }
 
 const ts = new Date().toISOString();
-const beginMarker = `% ol-mcp T3 multi-op begin @ ${ts}\n`;
-const endMarker = `% ol-mcp T3 multi-op end @ ${ts}\n`;
+const beginMarker = `% overleaf-mcp T3 multi-op begin @ ${ts}\n`;
+const endMarker = `% overleaf-mcp T3 multi-op end @ ${ts}\n`;
 const targetDeleteSubstring = "%The Nominal Response Model.... \n";
 
 const c = spawnMcp({ label: "multiop" });

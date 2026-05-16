@@ -83,7 +83,7 @@ export function registerEditFile(server: McpServer): void {
         const shouldTrack =
           args.track === "on" ? true : args.track === "off" ? false : ap.trackChangesOnForMe;
         const meta: NonNullable<OtUpdate["meta"]> = {
-          source: sock?.publicId ?? "ol-mcp",
+          source: sock?.publicId ?? "overleaf-mcp",
           ts: Date.now(),
           user_id: identity.userId,
         };

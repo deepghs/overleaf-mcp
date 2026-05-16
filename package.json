@@ -1,10 +1,10 @@
 {
-  "name": "ol-mcp",
+  "name": "overleaf-mcp",
   "version": "0.1.0",
   "description": "MCP server for Overleaf with tracked-changes support, via the reverse-engineered Socket.IO web API (not the Git bridge).",
   "type": "module",
   "bin": {
-    "ol-mcp": "./dist/index.js"
+    "overleaf-mcp": "./dist/index.js"
   },
   "files": [
     "dist",

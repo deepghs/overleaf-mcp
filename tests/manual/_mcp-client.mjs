@@ -1,4 +1,4 @@
-// Shared MCP client helper for tests/manual/*. Spawns the ol-mcp server as a
+// Shared MCP client helper for tests/manual/*. Spawns the overleaf-mcp server as a
 // child process and exposes a thin JSON-RPC client over its stdio.
 //
 // Usage:

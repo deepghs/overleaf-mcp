@@ -15,7 +15,7 @@ const SERVER = resolve(__dirname, "../../dist/index.js");
 
 const projectId = process.argv[2];
 const docPath = process.argv[3];
-const marker = process.argv[4] ?? `\n% ol-mcp edit test @ ${new Date().toISOString()}\n`;
+const marker = process.argv[4] ?? `\n% overleaf-mcp edit test @ ${new Date().toISOString()}\n`;
 if (!projectId || !docPath) {
   console.error("usage: edit-test.mjs <project_id> <doc_path> [marker]");
   process.exit(2);
