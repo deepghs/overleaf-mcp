@@ -80,15 +80,15 @@ ol-mcp authenticates with a session cookie pasted from your browser. The CSRF to
 |---|---|
 | `ping` | Health check. Does not contact Overleaf. |
 | `list_projects` | Lists projects on the configured account, sorted by most recently updated. Supports `name_contains`, `include_archived`, `include_trashed`, `limit`. |
-| `open_project` | Joins a project's real-time session and caches its file tree. Reports whether track-changes is on for your user. |
+| `open_project` | Joins a project's real-time session and caches its file tree. Returns rich metadata: `root_doc_path`, `compiler`, `spell_check_language`, `public_access_level`, owner + members (with privileges), and whether track-changes is on for your user. |
 | `list_files` | Lists the file tree of the open project (cached, no network). Filter by `kind` and `path_contains`. |
-| `read_file` | Reads a doc (returns text + OT version + a summary of tracked changes / comments) or a binary file (base64 + MIME). |
-| `edit_file` | Replaces a doc's contents. Computes a minimal diff via `diff-match-patch`, submits it as an OT operation, and adds `meta.tc` so the edit lands as a pending suggestion in the Review panel by default. Pass `track: "off"` to write directly (no tracking) or `track: "auto"` to honor the project's track-changes setting. |
+| `read_file` | Reads a doc (returns text + OT version + a summary of tracked changes / comments) or a binary file (base64 + MIME). `path` is optional — defaults to the project's root doc. |
+| `edit_file` | Replaces a doc's contents. Computes a minimal diff via `diff-match-patch`, submits it as an OT operation, and adds `meta.tc` so the edit lands as a pending suggestion in the Review panel by default. Pass `track: "off"` to write directly or `track: "auto"` to honor the project's track-changes setting. `path` is optional — defaults to the project's root doc. |
 | `list_tracked_changes` | Enumerates every pending tracked-change suggestion across the open project, with author name + email, doc path, op kind (insert/delete), position, op text, change_id. Filter by `author_email`, `author_id_endswith`, `path_contains`, `kind`, `text_contains`, `limit`. |
 | `accept_changes` | Accepts one or more tracked changes by `change_id` (from `list_tracked_changes`). Multi-doc groups are batched automatically. Irreversible. |
 | `reject_changes` | Rejects one or more tracked changes by `change_id`. Implemented as `applyOtUpdate` with the inverse op + `u:true` (same pathway Overleaf's web client uses). Irreversible. |
-| `compile` | Triggers an Overleaf compile and returns status + output-file list. Pass `root_doc`, `draft`, `stop_on_first_error` to control. |
-| `read_log` | Returns `output.log` from the most recent compile, with `!`-prefixed error lines surfaced at the top. |
+| `compile` | Triggers an Overleaf compile and returns a unified summary: `status`, `built_cleanly` (true iff PDF + zero LaTeX errors), `error_count`, `warning_count`, `first_errors` (sample), `output_files`, timings. Already fetches and parses `output.log` inline — no extra `read_log` call needed for the happy path. Pass `root_doc`, `draft`, `stop_on_first_error` to control. |
+| `read_log` | Returns the full `output.log` from the most recent compile, with `!`-prefixed error lines surfaced at the top. Use when `compile`'s inline summary isn't enough context. |
 | `list_comments` | Lists review-panel comment threads with doc path, quoted text, author, latest-message preview. Supports `include_resolved`, `path_contains`, `full`. |
 | `read_comment_thread` | Returns the full message history of one thread. |
 | `reply_comment` | Posts a new message to an existing thread. |
