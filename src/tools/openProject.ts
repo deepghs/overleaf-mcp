@@ -25,14 +25,22 @@ export function registerOpenProject(server: McpServer): void {
     async (args) => {
       try {
         const p = await open(args.project_id);
+        const project = p.project;
         const summary = {
           project_id: p.projectId,
           name: p.name,
+          root_doc_path: p.rootDocPath,
+          root_doc_id: p.rootDocId,
           entity_count: p.entities.length,
           docs: p.entities.filter((e) => e.kind === "doc").length,
           files: p.entities.filter((e) => e.kind === "file").length,
           folders: p.entities.filter((e) => e.kind === "folder").length,
           track_changes_on_for_me: p.trackChangesOnForMe,
+          compiler: project.compiler,
+          spell_check_language: project.spellCheckLanguage,
+          public_access_level: project.publicAccesLevel,
+          owner: project.owner ? { email: project.owner.email, name: [project.owner.first_name, project.owner.last_name].filter(Boolean).join(" ") || undefined } : undefined,
+          members: (project.members ?? []).map((m) => ({ email: m.email, name: [m.first_name, m.last_name].filter(Boolean).join(" ") || undefined, privileges: m.privileges })),
         };
         return {
           content: [
@@ -41,7 +49,9 @@ export function registerOpenProject(server: McpServer): void {
               text:
                 `Opened "${p.name}" (${summary.docs} docs, ${summary.files} files, ${summary.folders} folders). ` +
                 `Track changes ${summary.track_changes_on_for_me ? "is ON" : "is OFF"} for this user. ` +
-                `Use list_files to browse, read_file to read.`,
+                `Root doc: ${p.rootDocPath ?? "(unset)"}. ` +
+                `Compiler: ${summary.compiler ?? "(default)"}. ` +
+                `Use list_files to browse, read_file/edit_file to read+write (path defaults to the root doc).`,
             },
           ],
           structuredContent: summary,

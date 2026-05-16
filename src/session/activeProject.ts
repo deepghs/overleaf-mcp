@@ -9,6 +9,8 @@ export interface ActiveProject {
   project: ProjectEntity;
   entities: FlatEntity[];
   trackChangesOnForMe: boolean;
+  rootDocId?: string;
+  rootDocPath?: string;
   lastCompile?: CompileResponse;
 }
 
@@ -32,12 +34,16 @@ export async function open(projectId: string): Promise<ActiveProject> {
   const entities = root ? flattenTree(root) : [];
   const identity = await getIdentity();
   const trackChangesOnForMe = isTrackChangesOnForUser(joinedProject, identity.userId);
+  const rootDocId = joinedProject.rootDoc_id;
+  const rootDocPath = rootDocId ? entities.find((e) => e.kind === "doc" && e.id === rootDocId)?.path : undefined;
   active = {
     projectId,
     name: joinedProject.name ?? "(unnamed)",
     project: joinedProject,
     entities,
     trackChangesOnForMe,
+    rootDocId,
+    rootDocPath,
   };
   return active;
 }

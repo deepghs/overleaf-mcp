@@ -11,7 +11,8 @@ const Schema = z.object({
   path: z
     .string()
     .min(1)
-    .describe("Project-relative path of the file, e.g. 'main.tex' or 'chapters/intro.tex'. List with list_files first."),
+    .optional()
+    .describe("Project-relative path of the file, e.g. 'main.tex' or 'chapters/intro.tex'. If omitted, defaults to the project's root doc (visible as `root_doc_path` in `open_project`'s response)."),
 });
 
 const BINARY_EXTS = new Set([
@@ -59,15 +60,19 @@ export function registerReadFile(server: McpServer): void {
       if (!ap) {
         return { content: [{ type: "text", text: "No project is open. Call open_project first." }], isError: true };
       }
-      const entity = findByPath(args.path);
+      const resolvedPath = args.path ?? ap.rootDocPath;
+      if (!resolvedPath) {
+        return { content: [{ type: "text", text: "No path provided and the project has no configured root doc. Pass a `path` from `list_files`." }], isError: true };
+      }
+      const entity = findByPath(resolvedPath);
       if (!entity) {
         return {
-          content: [{ type: "text", text: `Path not found in project: '${args.path}'. Use list_files to inspect available paths.` }],
+          content: [{ type: "text", text: `Path not found in project: '${resolvedPath}'. Use list_files to inspect available paths.` }],
           isError: true,
         };
       }
       if (entity.kind === "folder") {
-        return { content: [{ type: "text", text: `'${args.path}' is a folder, not a file.` }], isError: true };
+        return { content: [{ type: "text", text: `'${resolvedPath}' is a folder, not a file.` }], isError: true };
       }
       try {
         if (entity.kind === "doc") {

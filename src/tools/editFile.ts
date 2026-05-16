@@ -13,7 +13,8 @@ const Schema = z.object({
   path: z
     .string()
     .min(1)
-    .describe("Project-relative path of the doc to edit, e.g. 'main.tex' or 'chapters/intro.tex'."),
+    .optional()
+    .describe("Project-relative path of the doc to edit, e.g. 'main.tex' or 'chapters/intro.tex'. If omitted, defaults to the project's root doc."),
   new_content: z
     .string()
     .describe("Desired full content of the file. The server computes a diff against the current content and submits the minimal OT operation."),
@@ -38,8 +39,8 @@ export function registerEditFile(server: McpServer): void {
       description:
         "Replaces the contents of a doc by computing a minimal diff and submitting it as an OT operation " +
         "over the live Socket.IO connection. The change lands in the web editor in real time. " +
-        "In v1 this writes as a direct edit (not yet tracked); Phase 4 will add the meta.tc flag so the " +
-        "edit appears as a pending suggestion in the review panel when track-changes is on. " +
+        "By default the edit appears as a pending suggestion in the Review panel (track:'on'); pass track:'off' to write directly. " +
+        "If `path` is omitted, defaults to the project's root doc. " +
         "Only .tex / .bib / .md / similar text docs are editable — binary files are not.",
       inputSchema: Schema.shape,
     },
@@ -48,15 +49,19 @@ export function registerEditFile(server: McpServer): void {
       if (!ap) {
         return { content: [{ type: "text", text: "No project is open. Call open_project first." }], isError: true };
       }
-      const entity = findByPath(args.path);
+      const resolvedPath = args.path ?? ap.rootDocPath;
+      if (!resolvedPath) {
+        return { content: [{ type: "text", text: "No path provided and the project has no configured root doc. Pass a `path`." }], isError: true };
+      }
+      const entity = findByPath(resolvedPath);
       if (!entity) {
         return {
-          content: [{ type: "text", text: `Path not found in project: '${args.path}'. Use list_files to inspect available paths.` }],
+          content: [{ type: "text", text: `Path not found in project: '${resolvedPath}'. Use list_files to inspect available paths.` }],
           isError: true,
         };
       }
       if (entity.kind !== "doc") {
-        return { content: [{ type: "text", text: `'${args.path}' is a ${entity.kind}, not an editable doc.` }], isError: true };
+        return { content: [{ type: "text", text: `'${resolvedPath}' is a ${entity.kind}, not an editable doc.` }], isError: true };
       }
       try {
         const cached = await ensureDocLoaded(entity.id);
