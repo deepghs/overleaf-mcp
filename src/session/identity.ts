@@ -1,6 +1,7 @@
 import { loadConfig, type Config } from "../config.js";
 import { OverleafAuthError } from "../api/errors.js";
 import { logger } from "../util/logger.js";
+import { discoverCookie } from "../auth/discover.js";
 
 export interface Identity {
   baseUrl: string;
@@ -18,18 +19,22 @@ function extractMeta(html: string, name: string): string | undefined {
   return html.match(re)?.[1];
 }
 
-async function resolveIdentity(config: Config): Promise<Identity> {
+export async function validateCookie(cookie: string, config: Config = loadConfig()): Promise<Identity> {
+  return resolveIdentity(cookie, config);
+}
+
+async function resolveIdentity(cookie: string, config: Config): Promise<Identity> {
   const url = `${config.baseUrl}/project`;
   const res = await fetch(url, {
     method: "GET",
     redirect: "manual",
-    headers: { Cookie: config.cookie, Connection: "keep-alive" },
+    headers: { Cookie: cookie, Connection: "keep-alive" },
   });
   if (res.status === 301 || res.status === 302) {
     const location = res.headers.get("location") ?? "";
     throw new OverleafAuthError(
       `Session cookie rejected (redirected to ${location || "login"}). ` +
-        "The cookie is likely expired — re-copy 'overleaf_session2' from your browser.",
+        "The cookie is likely expired — run `overleaf-mcp login` to refresh.",
     );
   }
   if (!res.ok) {
@@ -52,14 +57,17 @@ async function resolveIdentity(config: Config): Promise<Identity> {
     );
   }
   logger.info(`authenticated as ${userEmail || userId}`);
-  return { baseUrl: config.baseUrl, cookie: config.cookie, csrf, userId, userEmail };
+  return { baseUrl: config.baseUrl, cookie, csrf, userId, userEmail };
 }
 
 export async function getIdentity(): Promise<Identity> {
   if (cached) return cached;
   if (pending) return pending;
   const config = loadConfig();
-  pending = resolveIdentity(config)
+  pending = (async () => {
+    const cookie = await discoverCookie(config.baseUrl);
+    return resolveIdentity(cookie, config);
+  })()
     .then((id) => {
       cached = id;
       return id;

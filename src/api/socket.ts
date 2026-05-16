@@ -19,6 +19,7 @@ import WebSocket from "ws";
 
 import { OverleafApiError, OverleafAuthError } from "./errors.js";
 import { getIdentity, type Identity } from "../session/identity.js";
+import { withAuthRetry } from "../session/recovery.js";
 import type { ProjectEntity } from "./projectTypes.js";
 import { logger } from "../util/logger.js";
 
@@ -50,6 +51,28 @@ function decodePackedUtf8(line: string): string {
   return Buffer.from(line, "latin1").toString("utf8");
 }
 
+function mergeSetCookies(existing: string, responseHeaders: Headers): string {
+  // Use undici's getSetCookie when available (Node 22+); fall back to parsing
+  // the raw header for Node 20.
+  const headersAny = responseHeaders as Headers & { getSetCookie?: () => string[] };
+  const raw: string[] = headersAny.getSetCookie?.() ?? [];
+  if (!raw.length) {
+    const single = responseHeaders.get("set-cookie");
+    if (single) raw.push(single);
+  }
+  const existingNames = new Set(existing.split(";").map((p) => p.split("=")[0].trim().toLowerCase()));
+  const adds: string[] = [];
+  for (const sc of raw) {
+    const first = sc.split(";")[0].trim();
+    const name = first.split("=")[0].trim().toLowerCase();
+    if (!name || existingNames.has(name)) continue;
+    adds.push(first);
+    existingNames.add(name);
+  }
+  if (!adds.length) return existing;
+  return `${existing}; ${adds.join("; ")}`;
+}
+
 class OverleafSocket {
   private ws: WebSocket | null = null;
   private nextAckId = 1;
@@ -78,6 +101,13 @@ class OverleafSocket {
         Connection: "keep-alive",
       },
     });
+    if (hsRes.status >= 300 && hsRes.status < 400) {
+      const loc = hsRes.headers.get("location") ?? "";
+      if (/\/login(\?|$|\/)/i.test(loc)) {
+        throw new OverleafAuthError(`Socket.IO handshake redirected to ${loc} — session expired`);
+      }
+      throw new OverleafAuthError(`Socket.IO handshake returned ${hsRes.status} -> ${loc}`);
+    }
     if (hsRes.status !== 200) {
       const body = await hsRes.text().catch(() => "");
       throw new OverleafAuthError(`Socket.IO handshake returned ${hsRes.status}: ${body.slice(0, 200)}`);
@@ -88,9 +118,16 @@ class OverleafSocket {
       throw new OverleafApiError(0, hsBody, "handshake response did not include a sid or websocket transport");
     }
     this.heartbeatInterval = Math.max(15_000, (Number(hbStr) || 60) * 1000 - 5_000);
+    // The Overleaf SaaS sits behind a GCP load balancer that pins requests to
+    // a backend via a `GCLB` cookie set on the handshake response. The WS
+    // upgrade MUST land on the same backend (it carries the in-memory sid),
+    // so we extract any Set-Cookie from the handshake and merge it into the
+    // Cookie header we send on the upgrade. Without this the upgrade routes
+    // randomly and intermittently returns 502.
+    const upgradeCookie = mergeSetCookies(this.identity.cookie, hsRes.headers);
     const wsUrl = `${base.replace(/^http/, "ws")}/socket.io/1/websocket/${sid}`;
     const ws = new WebSocket(wsUrl, {
-      headers: { Cookie: this.identity.cookie, Origin: new URL(base).origin },
+      headers: { Cookie: upgradeCookie, Origin: new URL(base).origin },
       handshakeTimeout: timeoutMs,
     });
     this.ws = ws;
@@ -232,13 +269,20 @@ class OverleafSocket {
         return;
       }
       case "7": {
-        // Error
-        logger.error("server error frame", data);
+        // Type-7 frames are rare and usually mean the server invalidated our
+        // session (cookie expired server-side, etc). Reject all pending acks
+        // with an OverleafAuthError so the reconnect/retry wrapper picks them
+        // up, and close the WS so the next ensureSocketForProject doesn't
+        // hand back this broken instance.
+        logger.error("server error frame, treating as auth-recoverable", data);
+        const authErr = new OverleafAuthError(`server error frame: ${data}`);
         for (const [, p] of this.pending) {
           clearTimeout(p.timer);
-          p.reject(new Error(`server error: ${data}`));
+          p.reject(authErr);
         }
         this.pending.clear();
+        this.closed = true;
+        try { this.ws?.close(); } catch { /* ignore */ }
         return;
       }
       default:
@@ -310,46 +354,97 @@ export async function ensureSocketForProject(projectId: string): Promise<{
   publicId?: string;
   joinedProject?: ProjectEntity;
 }> {
-  if (active && active.projectId === projectId && active.isOpen()) {
-    return { socket: active, publicId: active.publicId ?? undefined, joinedProject: active.joinedProject ?? undefined };
-  }
-  if (active) {
-    logger.info(`switching project: ${active.projectId} -> ${projectId}`);
-    active.disconnect();
-    active = null;
-  }
-  const identity = await getIdentity();
-  const s = new OverleafSocket(projectId, identity);
-  await s.connect();
-  active = s;
-  return { socket: s, publicId: s.publicId ?? undefined, joinedProject: s.joinedProject ?? undefined };
+  return withAuthRetry(async () => {
+    if (active && active.projectId === projectId && active.isOpen()) {
+      return { socket: active, publicId: active.publicId ?? undefined, joinedProject: active.joinedProject ?? undefined };
+    }
+    if (active) {
+      logger.info(`switching project: ${active.projectId} -> ${projectId}`);
+      active.disconnect();
+      active = null;
+    }
+    const identity = await getIdentity();
+    const s = new OverleafSocket(projectId, identity);
+    await s.connect();
+    active = s;
+    return { socket: s, publicId: s.publicId ?? undefined, joinedProject: s.joinedProject ?? undefined };
+  });
 }
 
 export function getActiveSocket(): OverleafSocket | null {
   return active;
 }
 
+// Snapshot the active project, run an emit, and if it fails because the
+// socket got torn down (auth-shaped error or "socket closed"), evict the
+// cookie if needed, re-establish the socket on the same project, and retry
+// the emit exactly once. Callers should pass a prep step (e.g. re-join the
+// doc) if the operation requires per-doc state that the new socket lacks.
+async function withReconnectingSocket<T>(
+  op: () => Promise<T>,
+  prep?: () => Promise<void>,
+): Promise<T> {
+  const projectId = active?.projectId;
+  try {
+    return await op();
+  } catch (err) {
+    if (!projectId) throw err;
+    const isAuth = err instanceof OverleafAuthError;
+    const isClosed = err instanceof Error && /socket closed|socket not open/i.test(err.message);
+    if (!isAuth && !isClosed) throw err;
+    logger.info(`socket op failed (${(err as Error).message}); reconnecting to project ${projectId}`);
+    if (active) {
+      try { active.disconnect(); } catch { /* ignore */ }
+      active = null;
+    }
+    if (isAuth) {
+      const { evictAndRediscover } = await import("../auth/discover.js");
+      const { loadConfig } = await import("../config.js");
+      const { clearIdentity } = await import("../session/identity.js");
+      clearIdentity();
+      await evictAndRediscover(loadConfig().baseUrl);
+    }
+    await ensureSocketForProject(projectId);
+    if (prep) await prep();
+    return await op();
+  }
+}
+
 export async function joinDoc(docId: string): Promise<JoinDocResult> {
-  if (!active) throw new OverleafApiError(0, "", "no active project — call open_project first");
-  // The ack returns `[docLinesAscii, version, updates, ranges]`.
-  const ret = await active.emit<[string[], number, unknown[], unknown] | unknown>(
-    "joinDoc",
-    [docId, { encodeRanges: true }],
-  );
-  const tuple = Array.isArray(ret) ? ret : [ret];
-  const [docLinesAscii, version, updates, ranges] = tuple as [string[], number, unknown[], unknown];
-  const docLines = (docLinesAscii ?? []).map(decodePackedUtf8);
-  return { docLines, version: version ?? 0, updates: updates ?? [], ranges };
+  return withReconnectingSocket(async () => {
+    if (!active) throw new OverleafApiError(0, "", "no active project — call open_project first");
+    // The ack returns `[docLinesAscii, version, updates, ranges]`.
+    const ret = await active.emit<[string[], number, unknown[], unknown] | unknown>(
+      "joinDoc",
+      [docId, { encodeRanges: true }],
+    );
+    const tuple = Array.isArray(ret) ? ret : [ret];
+    const [docLinesAscii, version, updates, ranges] = tuple as [string[], number, unknown[], unknown];
+    const docLines = (docLinesAscii ?? []).map(decodePackedUtf8);
+    return { docLines, version: version ?? 0, updates: updates ?? [], ranges };
+  });
 }
 
 export async function leaveDoc(docId: string): Promise<void> {
+  // Best-effort; if the socket is gone, the doc is already implicitly left.
   if (!active) return;
   await active.emit("leaveDoc", [docId]).catch(() => undefined);
 }
 
 export async function applyOtUpdate(docId: string, update: OtUpdate): Promise<void> {
-  if (!active) throw new OverleafApiError(0, "", "no active project — call open_project first");
-  await active.emit("applyOtUpdate", [docId, update]);
+  await withReconnectingSocket(
+    async () => {
+      if (!active) throw new OverleafApiError(0, "", "no active project — call open_project first");
+      await active.emit("applyOtUpdate", [docId, update]);
+    },
+    // After a reconnect, the fresh socket has no docs joined. Re-join so the
+    // retried applyOtUpdate hits a socket that knows about this doc. Note:
+    // joinDoc returns the current version, but our `update.v` was computed
+    // against the pre-reconnect version. The server's OT layer either accepts
+    // (if the version matches) or rejects with a version-conflict, which we
+    // propagate to the caller — same as if the original emit had failed.
+    async () => { await joinDoc(docId); },
+  );
 }
 
 export function disconnectActive(): void {

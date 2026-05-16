@@ -11,6 +11,7 @@ import { registerCompile, registerReadLog } from "./tools/compile.js";
 import { registerComments } from "./tools/comments.js";
 import { registerTrackedChanges } from "./tools/trackedChanges.js";
 import { close as closeActiveProject } from "./session/activeProject.js";
+import { maybeRunCli } from "./auth/cli.js";
 import { logger } from "./util/logger.js";
 
 const SERVER_NAME = "overleaf-mcp";
@@ -70,7 +71,9 @@ async function main(): Promise<void> {
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
 }
 
-main().catch((err: unknown) => {
-  logger.error("fatal startup error", err instanceof Error ? err.stack ?? err.message : err);
-  process.exit(1);
-});
+maybeRunCli(process.argv)
+  .then(() => main())
+  .catch((err: unknown) => {
+    logger.error("fatal startup error", err instanceof Error ? err.stack ?? err.message : err);
+    process.exit(1);
+  });

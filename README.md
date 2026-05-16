@@ -65,17 +65,35 @@ No local install needed — `npx` fetches and runs the latest version. Add this 
   "mcpServers": {
     "overleaf": {
       "command": "npx",
-      "args": ["-y", "@netique/overleaf-mcp"],
-      "env": {
-        "OL_BASE_URL": "https://www.overleaf.com",
-        "OL_COOKIE": "overleaf_session2=s%3A...."
-      }
+      "args": ["-y", "@netique/overleaf-mcp"]
     }
   }
 }
 ```
 
-For self-hosted Community Edition: set `OL_BASE_URL` to your server (e.g. `https://overleaf.mylab.edu`). Same cookie capture, same tools.
+The first MCP tool call (or `npx @netique/overleaf-mcp login` run ahead of time) opens a Chrome window pointed at Overleaf — log in normally and the session cookie is captured and saved to a file under your config dir. No DevTools paste, no cookie in your MCP config. When the cookie expires (~5 days), the next tool call re-opens the window and refreshes it.
+
+For self-hosted Community Edition: set `OL_BASE_URL`:
+
+```json
+{
+  "mcpServers": {
+    "overleaf": {
+      "command": "npx",
+      "args": ["-y", "@netique/overleaf-mcp"],
+      "env": { "OL_BASE_URL": "https://overleaf.mylab.edu" }
+    }
+  }
+}
+```
+
+Useful one-shot commands:
+
+```sh
+npx @netique/overleaf-mcp login              # opens Chrome, captures cookie
+npx @netique/overleaf-mcp status             # who am I logged in as
+npx @netique/overleaf-mcp logout --confirm   # clear the saved cookie
+```
 
 <details>
 <summary>From source (for development)</summary>
@@ -94,8 +112,7 @@ Then point your MCP config at the built file:
   "mcpServers": {
     "overleaf": {
       "command": "node",
-      "args": ["/absolute/path/to/overleaf-mcp/dist/index.js"],
-      "env": { "OL_COOKIE": "overleaf_session2=s%3A...." }
+      "args": ["/absolute/path/to/overleaf-mcp/dist/index.js"]
     }
   }
 }
@@ -104,30 +121,39 @@ Then point your MCP config at the built file:
 
 ## Authentication
 
-overleaf-mcp authenticates with a session cookie pasted from your browser. The CSRF token is auto-discovered from the `/project` page after login, so you don't need to copy it separately. (Set `OL_CSRF` only if your Overleaf instance doesn't expose the `ol-csrfToken` meta tag.)
+The session cookie lives in a plaintext file at `<configDir>/overleaf-mcp/cookie.json` (mode 0600), where `<configDir>` is `~/Library/Application Support` on macOS, `$XDG_CONFIG_HOME` (or `~/.config`) on Linux, `%APPDATA%` on Windows. The CSRF token is auto-discovered from the `/project` page on each session — no separate copy needed.
 
-### Capturing the cookie
+### How the cookie gets there
 
-1. Log into Overleaf in your browser.
-2. Open DevTools → **Application** (Chrome/Edge) or **Storage** (Firefox) → **Cookies** → `https://www.overleaf.com`.
-3. Copy the **value** of `overleaf_session2` — it starts with `s%3A` and is long. That's your `OL_COOKIE` (format: `overleaf_session2=s%3A...`).
+`npx @netique/overleaf-mcp login` — or an MCP tool call that finds no stored cookie — spawns Chrome with a **dedicated browser profile** at `<configDir>/overleaf-mcp/chrome-profile/`, points it at `${OL_BASE_URL}/project`, and reads the session cookie via the Chrome DevTools Protocol once the dashboard loads. Why a dedicated profile:
 
-> ⚠️ The pasted session cookie grants full account access. Treat it like a password — do not commit it, share it, or paste it into shared configs. Cookies expire periodically; if you see auth errors, re-copy.
+- We don't touch your real Chrome profile, so there's no macOS Keychain prompt for your everyday browser.
+- It's a real interactive Chrome window, so captcha, Google OAuth, ORCID, institutional SSO and 2FA all work out of the box.
+- The profile persists. Re-logins are usually a flash: window opens → /project loads → cookie captured → window closes.
+
+When the cookie expires (Overleaf cookies last ~5 days), the next request hits a 302 to `/login`, overleaf-mcp evicts the stale entry, re-launches Chrome and captures a fresh one. If your browser session also expired, the Chrome window waits for you to log in (up to 5 minutes).
+
+Any Chromium-family browser works — Chrome, Brave, Edge, Arc, Chromium. If `findChrome` can't locate one automatically, set `OL_BROWSER` to a binary path.
+
+> ⚠️ The session cookie grants full account access. The cookie file is mode 0600 but plaintext on disk. Treat it like a password. Remove it with `overleaf-mcp logout --confirm`.
 
 ### Environment variables
 
-| Var | Required | Default | Notes |
-|---|---|---|---|
-| `OL_COOKIE` | yes | — | Session cookie, see above. |
-| `OL_BASE_URL` | no | `https://www.overleaf.com` | Override for self-hosted Overleaf. |
-| `OL_CSRF` | no | auto-discovered | Force a specific CSRF token. Only needed if your server doesn't ship the `ol-csrfToken` meta tag. |
-| `OL_MCP_LOG_LEVEL` | no | `info` | `debug`, `info`, `warn`, `error`. Goes to stderr; stdout is reserved for MCP JSON-RPC. |
+| Var | Default | Notes |
+|---|---|---|
+| `OL_BASE_URL` | `https://www.overleaf.com` | Override for self-hosted Overleaf. |
+| `OL_BROWSER` | auto-detected | Path to a Chromium-family browser if auto-detection fails (Chrome / Brave / Edge / Arc / Chromium). |
+| `OL_INSECURE` | — | Set to `1` to pass `--ignore-certificate-errors` to the captured Chrome instance — for self-hosted CE with a self-signed cert. |
+| `OL_CSRF` | auto-discovered | Force a specific CSRF token. Only needed if your server doesn't ship the `ol-csrfToken` meta tag. |
+| `OL_MCP_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error`. Goes to stderr; stdout is reserved for MCP JSON-RPC. |
 
 ## Troubleshooting
 
-**`OverleafAuthError: Session cookie rejected (redirected to /login)`** — your `OL_COOKIE` has expired. Re-copy `overleaf_session2` from DevTools.
+**`OverleafAuthError: Session cookie rejected (redirected to /login)`** — your stored cookie has expired. overleaf-mcp relaunches Chrome automatically on the next tool call to refresh; you should only see this surface as a user-facing error if Chrome itself failed to start.
 
-**`Socket.IO handshake returned 502`** — Overleaf's load balancer rejected the WebSocket upgrade. Almost always means the cookie was rejected. Same fix as above.
+**`No Chromium-family browser found`** — install Chrome (or Brave/Edge/Arc/Chromium), or set `OL_BROWSER` to a binary path.
+
+**`Socket.IO handshake returned 502`** — Overleaf's load balancer rejected the WebSocket upgrade. Usually means the cookie was rejected — `overleaf-mcp` should auto-recover on the next tool call.
 
 **`Could not find ol-csrfToken meta tag`** — your Overleaf server doesn't expose the CSRF meta tag (rare; mostly very old Community Edition). Set `OL_CSRF` explicitly.
 

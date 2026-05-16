@@ -4,7 +4,8 @@
 // reflected in a second read.
 //
 // Usage:
-//   OL_COOKIE='...' node tests/manual/edit-test.mjs <project_id> <doc_path> [marker]
+//   node tests/manual/edit-test.mjs <project_id> <doc_path> [marker]
+// (login first via `node dist/index.js login` so a cookie file exists.)
 
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";

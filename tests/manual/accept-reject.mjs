@@ -2,7 +2,8 @@
 // Smoke-test the three tracked-change tools end-to-end against a live project:
 //   list_tracked_changes -> accept_changes (1 id) -> reject_changes (1 id) -> list_tracked_changes
 //
-// Usage: OL_COOKIE='...' node tests/manual/accept-reject.mjs <project_id>
+// Usage: node tests/manual/accept-reject.mjs <project_id>
+// (login first via `node dist/index.js login` so a cookie file exists.)
 
 import { spawnMcp } from "./_mcp-client.mjs";
 

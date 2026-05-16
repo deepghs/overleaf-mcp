@@ -3,9 +3,10 @@
 // drives the MCP initialize handshake, and calls one tool.
 //
 // Usage:
-//   OL_COOKIE='overleaf_session2=s%3A...; GCLB=...' node tests/manual/smoke.mjs list_projects
-//   OL_COOKIE='...' node tests/manual/smoke.mjs ping
-//   OL_COOKIE='...' OL_BASE_URL='https://your-overleaf.example' node tests/manual/smoke.mjs list_projects '{"name_contains":"thesis"}'
+//   node tests/manual/smoke.mjs list_projects
+//   node tests/manual/smoke.mjs ping
+//   OL_BASE_URL='https://your-overleaf.example' node tests/manual/smoke.mjs list_projects '{"name_contains":"thesis"}'
+// (login first via `node dist/index.js login` so a cookie file exists.)
 //
 // Does NOT require a running Claude Desktop. Reads its env from the shell.
 
