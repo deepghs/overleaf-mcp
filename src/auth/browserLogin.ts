@@ -46,7 +46,11 @@ async function readDevToolsPort(profile: string, deadline: number): Promise<{ po
     }
     await new Promise((r) => setTimeout(r, 50));
   }
-  throw new Error("Chrome did not write DevToolsActivePort within timeout");
+  throw new Error(
+    `Browser auth setup failed: Chrome was spawned but did not open its DevTools port within timeout. ` +
+      `This is a local environment problem — likely a broken Chrome install or a non-writable profile dir at ${profile}. ` +
+      `Do not retry the MCP call without user intervention; it will hit the same error. Ask the user to verify Chrome works manually.`,
+  );
 }
 
 function chromeFlags(profile: string, insecure: boolean): string[] {
@@ -135,7 +139,16 @@ export async function captureCookie(baseUrl: string, opts: CaptureOpts = {}): Pr
     const { port, path: browserWsPath } = await readDevToolsPort(profile, portDeadline);
     if (earlyExitErr) throw earlyExitErr;
     const browserWsUrl = `ws://127.0.0.1:${port}${browserWsPath}`;
-    cdp = await CdpClient.connect(browserWsUrl);
+    try {
+      cdp = await CdpClient.connect(browserWsUrl);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      throw new Error(
+        `Browser auth setup failed: Chrome wrote a DevTools port (${port}) but the endpoint refused our connection (${msg}). ` +
+          `This is a local environment problem, NOT an Overleaf or network issue — retrying the same MCP call will hit the same error. ` +
+          `Ask the user to restart Claude (Desktop or Code) so the MCP server is respawned; if the failure persists, the Chrome profile at ${profile} may need to be removed.`,
+      );
+    }
 
     // Reuse the about:blank tab Chrome opened on spawn. Creating a second
     // target makes Overleaf see two concurrent /login requests, which it

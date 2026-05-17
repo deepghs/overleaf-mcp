@@ -33,6 +33,17 @@ const INSTRUCTIONS = [
   "  2. open_project(id) -> joins the Socket.IO room, returns file tree + tc state",
   "  3. read_file / edit_file by path (e.g. 'chapters/intro.tex')",
   "  4. compile to verify edits build",
+  "",
+  "Auth UX (important for the user-facing message):",
+  "If no session cookie is stored yet, or the previous one has expired (Overleaf",
+  "cookies last ~5 days), the next tool call will spawn an isolated Chrome window",
+  "pointed at Overleaf so the user can log in. The window uses a dedicated profile",
+  "that does NOT share the user's main browser data, saved passwords, or any",
+  "password-manager extension — they must type their Overleaf credentials (or",
+  "click their SSO provider) manually. The window then closes automatically.",
+  "Before triggering an Overleaf tool call when you don't already know the user",
+  "is authenticated, briefly warn them: \"a Chrome window may pop up asking you",
+  "to log in — type your credentials there, it's a clean isolated profile.\"",
 ].join("\n");
 
 async function main(): Promise<void> {
