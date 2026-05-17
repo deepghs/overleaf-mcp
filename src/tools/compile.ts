@@ -21,15 +21,18 @@ const Schema = z.object({
     .describe("Stop on the first LaTeX error instead of continuing to produce a partial PDF."),
 });
 
-function summarizeErrors(log: string | undefined): { errors: string[]; warnings: number } {
-  if (!log) return { errors: [], warnings: 0 };
+function summarizeErrors(
+  log: string | undefined,
+  maxErrorLines = 20,
+): { errors: string[]; error_count: number; warnings: number } {
+  if (!log) return { errors: [], error_count: 0, warnings: 0 };
   const errors: string[] = [];
   let warnings = 0;
   for (const line of log.split("\n")) {
     if (/^! /.test(line)) errors.push(line.trim());
     else if (/warning/i.test(line)) warnings++;
   }
-  return { errors: errors.slice(0, 20), warnings };
+  return { errors: errors.slice(0, maxErrorLines), error_count: errors.length, warnings };
 }
 
 // Build the GET-able URL for an output file from a compile response, including
@@ -95,7 +98,7 @@ export function registerCompile(server: McpServer): void {
               logBytes = log.length;
               const summarized = summarizeErrors(log);
               errorLines = summarized.errors;
-              errorCount = errorLines.length;
+              errorCount = summarized.error_count;
               warningCount = summarized.warnings;
             }
           } catch (logErr) {
@@ -151,7 +154,7 @@ export function registerReadLog(server: McpServer): void {
       description:
         "Returns the full LaTeX log from the most recent `compile` call. " +
         "`compile` already includes the error count + first few errors in its response — use this only when you need more context (full log, line numbers, package warnings, etc.). " +
-        "Includes a summary of `!`-prefixed error lines at the top, then the full log (truncated to the last 8000 chars).",
+        "Includes a summary of `!`-prefixed error lines at the top (sampled, with total count), then the full log (truncated to the last 8000 chars).",
       inputSchema: {},
       annotations: { readOnlyHint: true },
     },
@@ -171,11 +174,12 @@ export function registerReadLog(server: McpServer): void {
         if (fullLog == null) {
           return { content: [{ type: "text", text: "No output.log available." }], isError: true };
         }
-        const { errors, warnings } = summarizeErrors(fullLog);
+        const { errors, error_count, warnings } = summarizeErrors(fullLog, 200);
         const tail = fullLog.length > 8000 ? fullLog.slice(-8000) : fullLog;
-        const errorBlock = errors.length
-          ? `=== ${errors.length} error line(s) ===\n${errors.join("\n")}\n\n`
-          : "=== no '! ' error lines ===\n\n";
+        const errorHeader = error_count > errors.length
+          ? `=== ${error_count} error line(s) (showing first ${errors.length}) ===`
+          : `=== ${error_count} error line(s) ===`;
+        const errorBlock = errors.length ? `${errorHeader}\n${errors.join("\n")}\n\n` : "=== no '! ' error lines ===\n\n";
         const text =
           errorBlock +
           (fullLog.length > 8000 ? `=== output.log (last 8000 of ${fullLog.length} chars) ===\n` : "=== output.log ===\n") +
@@ -184,7 +188,9 @@ export function registerReadLog(server: McpServer): void {
           content: [{ type: "text", text }],
           structuredContent: {
             log_bytes: fullLog.length,
+            error_count,
             error_lines: errors,
+            error_lines_sampled: errors.length,
             warning_count: warnings,
           },
         };
