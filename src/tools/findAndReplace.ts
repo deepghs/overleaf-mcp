@@ -165,6 +165,11 @@ export function registerFindAndReplace(server: McpServer): void {
         const sock = getActiveSocket();
         const shouldTrack =
           args.track === "on" ? true : args.track === "off" ? false : ap.trackChangesOnForMe;
+        // The server enforces tracking when the user has track_changes_on_for_me,
+        // regardless of meta.tc. So even a track:"off" call lands as tracked on
+        // such projects — reflect that in the response so the caller knows.
+        const serverWillTrack = shouldTrack || ap.trackChangesOnForMe;
+        const trackOverridden = args.track === "off" && ap.trackChangesOnForMe;
         const meta: NonNullable<OtUpdate["meta"]> = {
           source: sock?.publicId ?? "overleaf-mcp",
           ts: Date.now(),
@@ -176,14 +181,17 @@ export function registerFindAndReplace(server: McpServer): void {
         const newVersion = cached.version + 1;
         updateDoc(entity.id, newContent, newVersion);
         const replacements = args.replace_all ? indices.length : 1;
+        const trackingNote = serverWillTrack
+          ? (trackOverridden
+              ? "Submitted as a tracked change — `track:\"off\"` was overridden because the project has track_changes_on_for_me. The edit lands as a pending suggestion in Overleaf's Review panel."
+              : "Submitted as tracked changes — should appear as a pending suggestion in Overleaf's Review panel.")
+          : "Submitted as a direct edit (no tracking).";
         return {
           content: [{
             type: "text",
             text:
               `Replaced ${replacements} occurrence(s) in '${entity.path}'. Doc version ${cached.version} -> ${newVersion}. ` +
-              (shouldTrack
-                ? "Submitted as tracked changes — should appear as a pending suggestion in Overleaf's review panel."
-                : "Submitted as a direct edit (no tracking)."),
+              trackingNote,
           }],
           structuredContent: {
             path: entity.path,
@@ -192,8 +200,9 @@ export function registerFindAndReplace(server: McpServer): void {
             ops_applied: ops.length,
             version_before: cached.version,
             version_after: newVersion,
-            tracked: shouldTrack,
+            tracked: serverWillTrack,
             track_mode: args.track,
+            track_overridden: trackOverridden,
           },
         };
       } catch (err) {
