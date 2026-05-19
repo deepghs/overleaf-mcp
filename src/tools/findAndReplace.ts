@@ -7,6 +7,7 @@ import { ensureDocLoaded, updateDoc } from "../session/docCache.js";
 import { findByPath, getActiveProject } from "../session/activeProject.js";
 import { textToOps, type ShareJsOp } from "../ot/diff.js";
 import { generateIdSeed } from "../ot/trackedChanges.js";
+import { checkBaseline, verifyEdit } from "../ot/verify.js";
 import { logger } from "../util/logger.js";
 
 const Schema = z.object({
@@ -42,6 +43,12 @@ const Schema = z.object({
     .default("on")
     .describe(
       "Tracked-changes mode. Default 'on' lands the edit as a pending suggestion in the Review panel. 'off' writes directly; 'auto' tracks only when the project has track-changes enabled for this user.",
+    ),
+  strict_version: z
+    .boolean()
+    .default(false)
+    .describe(
+      "If true, re-fetch the doc version before sending the edit and refuse if the cached baseline is stale. Catches races from parallel agents (each MCP process has its own cache) or a concurrently open Overleaf web editor at the cost of one extra round-trip. Without this, the server's OT transform handles stale-version edits silently, which can land the op in an unexpected location or collapse it to a no-op. Recommended when several agents may be editing the same project.",
     ),
 });
 
@@ -110,12 +117,31 @@ export function registerFindAndReplace(server: McpServer): void {
         return { content: [{ type: "text", text: `'${resolvedPath}' is a ${entity.kind}, not an editable doc.` }], isError: true };
       }
       try {
-        const cached = await ensureDocLoaded(entity.id);
+        let cached = await ensureDocLoaded(entity.id);
         if (args.expected_version !== undefined && cached.version !== args.expected_version) {
           return {
             content: [{ type: "text", text: `Version mismatch: cached version is ${cached.version}, you provided ${args.expected_version}. Re-read the file and retry.` }],
             isError: true,
           };
+        }
+        if (args.strict_version) {
+          const bc = await checkBaseline(entity.id, cached.version);
+          if (bc.stale) {
+            updateDoc(entity.id, bc.serverText, bc.serverVersion);
+            return {
+              content: [{ type: "text", text: `Stale baseline (strict_version): cached v${cached.version}, server is at v${bc.serverVersion}. The doc was modified by another writer since you last read it. Re-call read_file before retrying.` }],
+              isError: true,
+              structuredContent: {
+                path: entity.path,
+                doc_id: entity.id,
+                stale_baseline: true,
+                cached_version: cached.version,
+                server_version: bc.serverVersion,
+              },
+            };
+          }
+          updateDoc(entity.id, bc.serverText, bc.serverVersion);
+          cached = { docId: entity.id, text: bc.serverText, version: bc.serverVersion };
         }
         const indices = findAllIndices(cached.text, args.old_string);
         if (indices.length === 0) {
@@ -147,6 +173,7 @@ export function registerFindAndReplace(server: McpServer): void {
             isError: true,
           };
         }
+        const preEditText = cached.text;
         let newContent: string;
         if (args.replace_all) {
           newContent = cached.text.split(args.old_string).join(args.new_string);
@@ -178,20 +205,62 @@ export function registerFindAndReplace(server: McpServer): void {
         if (shouldTrack) meta.tc = generateIdSeed();
         const update: OtUpdate = { doc: entity.id, op: ops, v: cached.version, meta };
         await applyOtUpdate(entity.id, update);
-        const newVersion = cached.version + 1;
-        updateDoc(entity.id, newContent, newVersion);
+        const optimisticVersion = cached.version + 1;
         const replacements = args.replace_all ? indices.length : 1;
         const trackingNote = serverWillTrack
           ? (trackOverridden
               ? "Submitted as a tracked change — `track:\"off\"` was overridden because the project has track_changes_on_for_me. The edit lands as a pending suggestion in Overleaf's Review panel."
               : "Submitted as tracked changes — should appear as a pending suggestion in Overleaf's Review panel.")
           : "Submitted as a direct edit (no tracking).";
+
+        let v: Awaited<ReturnType<typeof verifyEdit>> | undefined;
+        let verifyError: string | undefined;
+        try {
+          v = await verifyEdit(entity.id, preEditText, newContent, optimisticVersion);
+        } catch (e) {
+          verifyError = e instanceof Error ? e.message : String(e);
+        }
+        if (v) updateDoc(entity.id, v.serverText, v.serverVersion);
+        else updateDoc(entity.id, newContent, optimisticVersion);
+
+        if (v && v.silentNoOp) {
+          return {
+            content: [{ type: "text", text:
+              `Server acked the OT update for '${entity.path}' but the doc text is unchanged (silent no-op). ` +
+              `\`old_string\` matched in your cached baseline, ops were sent and acked, but the server's doc didn't move — usually because a parallel agent or open editor bumped the version between your last read and this edit, and the server's OT transform collapsed your ops. ` +
+              `Cache is now synced to the real server state (v${v.serverVersion}). Re-call read_file and retry; consider \`strict_version: true\` to fail fast on stale baselines.`,
+            }],
+            isError: true,
+            structuredContent: {
+              path: entity.path,
+              doc_id: entity.id,
+              replacements: 0,
+              ops_applied: ops.length,
+              version_before: cached.version,
+              version_after: v.serverVersion,
+              tracked: serverWillTrack,
+              track_mode: args.track,
+              track_overridden: trackOverridden,
+              verification_failed: true,
+              silent_no_op: true,
+            },
+          };
+        }
+
+        const concurrentNote = v?.hadConcurrentWritesAfter
+          ? ` Note: server is at v${v.serverVersion} (> optimistic v${optimisticVersion}) — another writer landed updates after this edit; your op is in but the doc has moved on.`
+          : !v?.matchesExpected && v
+            ? ` Note: server text doesn't byte-match the predicted post-edit content (cache synced to actual server state at v${v.serverVersion}); the replace landed but may have been OT-transformed.`
+            : "";
+        const verifySkippedNote = verifyError ? ` (post-edit verification skipped: ${verifyError})` : "";
+        const versionAfter = v ? v.serverVersion : optimisticVersion;
+
         return {
           content: [{
             type: "text",
             text:
-              `Replaced ${replacements} occurrence(s) in '${entity.path}'. Doc version ${cached.version} -> ${newVersion}. ` +
-              trackingNote,
+              `Replaced ${replacements} occurrence(s) in '${entity.path}'. Doc version ${cached.version} -> ${versionAfter}. ` +
+              trackingNote + concurrentNote + verifySkippedNote,
           }],
           structuredContent: {
             path: entity.path,
@@ -199,10 +268,13 @@ export function registerFindAndReplace(server: McpServer): void {
             replacements,
             ops_applied: ops.length,
             version_before: cached.version,
-            version_after: newVersion,
+            version_after: versionAfter,
             tracked: serverWillTrack,
             track_mode: args.track,
             track_overridden: trackOverridden,
+            verified: v ? v.matchesExpected : false,
+            had_concurrent_writes_after: v?.hadConcurrentWritesAfter ?? false,
+            verify_skipped: Boolean(verifyError),
           },
         };
       } catch (err) {
