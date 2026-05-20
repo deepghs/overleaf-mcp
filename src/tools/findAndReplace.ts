@@ -1,13 +1,9 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-import { applyOtUpdate, getActiveSocket, type OtUpdate } from "../api/socket.js";
-import { getIdentity } from "../session/identity.js";
-import { ensureDocLoaded, updateDoc } from "../session/docCache.js";
-import { findByPath, getActiveProject } from "../session/activeProject.js";
 import { textToOps, type ShareJsOp } from "../ot/diff.js";
-import { generateIdSeed } from "../ot/trackedChanges.js";
-import { checkBaseline, verifyEdit } from "../ot/verify.js";
+import { TRACK_MODES } from "../ot/trackedChanges.js";
+import { prepareBaseline, resolveDocForEdit, submitAndVerify } from "../ot/editPipeline.js";
 import { logger } from "../util/logger.js";
 
 const Schema = z.object({
@@ -39,10 +35,10 @@ const Schema = z.object({
     .optional()
     .describe("Optional safety check. If the doc's current version differs, the edit is rejected."),
   track: z
-    .enum(["auto", "on", "off"])
+    .enum(TRACK_MODES)
     .default("on")
     .describe(
-      "Tracked-changes mode. Default 'on' lands the edit as a pending suggestion in the Review panel. 'off' writes directly; 'auto' tracks only when the project has track-changes enabled for this user.",
+      "Tracked-changes mode. This is a client *request*, not a guarantee — when the project has `track_changes_on_for_me: true` (visible in `open_project`'s response), the server forces tracking regardless of what you pass, and the tool response will report `tracked: true, track_overridden: true`. Don't tell the user 'this will be untracked' without first checking that flag from `open_project`. Modes: 'on' (default) — explicitly request tracking; edit lands as a pending suggestion in Overleaf's Review panel. 'off' — request a direct untracked write (may be overridden as above). 'auto' — track iff the project's tc setting says so.",
     ),
   strict_version: z
     .boolean()
@@ -91,58 +87,19 @@ export function registerFindAndReplace(server: McpServer): void {
         "By default `old_string` must be unique; ambiguous matches are returned with line:column locations so you can extend the match. " +
         "Submits the minimal OT operation through the same pathway as `edit_file`, so by default it lands as a pending suggestion in Overleaf's Review panel (track:'on'). " +
         "If `path` is omitted, defaults to the project's root doc. " +
-        "Prefer this over `edit_file` for targeted edits — it's cheaper in tokens and avoids accidental whitespace drift from re-emitting the surrounding text.",
+        "USE WHEN: a SINGLE targeted edit (one typo, one label rename, one heading change) in a large doc — saves tokens vs. re-emitting the body and avoids accidental whitespace drift. " +
+        "AVOID FOR BATCH WORK: for multiple substitutions (e.g. converting many words, applying a style guide across a chapter) prefer ONE `edit_file` call with all changes computed client-side. " +
+        "Each find_and_replace is its own round-trip with its own race window, its own tracked-change entry, and its own cache-sync cycle — calling it N times for N small changes amplifies the failure modes that one batched `edit_file` would avoid.",
       inputSchema: Schema.shape,
     },
     async (args) => {
-      const ap = getActiveProject();
-      if (!ap) {
-        return { content: [{ type: "text", text: "No project is open. Call open_project first." }], isError: true };
-      }
-      const resolvedPath = args.path ?? ap.rootDocPath;
-      if (!resolvedPath) {
-        return {
-          content: [{ type: "text", text: "No path provided and the project has no configured root doc. Pass a `path`." }],
-          isError: true,
-        };
-      }
-      const entity = findByPath(resolvedPath);
-      if (!entity) {
-        return {
-          content: [{ type: "text", text: `Path not found in project: '${resolvedPath}'. Use list_files to inspect available paths.` }],
-          isError: true,
-        };
-      }
-      if (entity.kind !== "doc") {
-        return { content: [{ type: "text", text: `'${resolvedPath}' is a ${entity.kind}, not an editable doc.` }], isError: true };
-      }
+      const resolved = resolveDocForEdit(args.path);
+      if (!resolved.ok) return resolved.response;
+      const { ap, entity } = resolved.doc;
       try {
-        let cached = await ensureDocLoaded(entity.id);
-        if (args.expected_version !== undefined && cached.version !== args.expected_version) {
-          return {
-            content: [{ type: "text", text: `Version mismatch: cached version is ${cached.version}, you provided ${args.expected_version}. Re-read the file and retry.` }],
-            isError: true,
-          };
-        }
-        if (args.strict_version) {
-          const bc = await checkBaseline(entity.id, cached.version);
-          if (bc.stale) {
-            updateDoc(entity.id, bc.serverText, bc.serverVersion);
-            return {
-              content: [{ type: "text", text: `Stale baseline (strict_version): cached v${cached.version}, server is at v${bc.serverVersion}. The doc was modified by another writer since you last read it. Re-call read_file before retrying.` }],
-              isError: true,
-              structuredContent: {
-                path: entity.path,
-                doc_id: entity.id,
-                stale_baseline: true,
-                cached_version: cached.version,
-                server_version: bc.serverVersion,
-              },
-            };
-          }
-          updateDoc(entity.id, bc.serverText, bc.serverVersion);
-          cached = { docId: entity.id, text: bc.serverText, version: bc.serverVersion };
-        }
+        const baseline = await prepareBaseline(entity, { expected_version: args.expected_version, strict_version: args.strict_version });
+        if (!baseline.ok) return baseline.response;
+        const { cached } = baseline;
         const indices = findAllIndices(cached.text, args.old_string);
         if (indices.length === 0) {
           return {
@@ -174,13 +131,9 @@ export function registerFindAndReplace(server: McpServer): void {
           };
         }
         const preEditText = cached.text;
-        let newContent: string;
-        if (args.replace_all) {
-          newContent = cached.text.split(args.old_string).join(args.new_string);
-        } else {
-          const idx = indices[0];
-          newContent = cached.text.slice(0, idx) + args.new_string + cached.text.slice(idx + args.old_string.length);
-        }
+        const newContent = args.replace_all
+          ? cached.text.split(args.old_string).join(args.new_string)
+          : cached.text.slice(0, indices[0]) + args.new_string + cached.text.slice(indices[0] + args.old_string.length);
         const ops: ShareJsOp[] = textToOps(cached.text, newContent);
         if (ops.length === 0) {
           return {
@@ -188,47 +141,19 @@ export function registerFindAndReplace(server: McpServer): void {
             structuredContent: { path: entity.path, doc_id: entity.id, version: cached.version, ops_applied: 0 },
           };
         }
-        const identity = await getIdentity();
-        const sock = getActiveSocket();
-        const shouldTrack =
-          args.track === "on" ? true : args.track === "off" ? false : ap.trackChangesOnForMe;
-        // The server enforces tracking when the user has track_changes_on_for_me,
-        // regardless of meta.tc. So even a track:"off" call lands as tracked on
-        // such projects — reflect that in the response so the caller knows.
-        const serverWillTrack = shouldTrack || ap.trackChangesOnForMe;
-        const trackOverridden = args.track === "off" && ap.trackChangesOnForMe;
-        const meta: NonNullable<OtUpdate["meta"]> = {
-          source: sock?.publicId ?? "overleaf-mcp",
-          ts: Date.now(),
-          user_id: identity.userId,
-        };
-        if (shouldTrack) meta.tc = generateIdSeed();
-        const update: OtUpdate = { doc: entity.id, op: ops, v: cached.version, meta };
-        await applyOtUpdate(entity.id, update);
-        const optimisticVersion = cached.version + 1;
+        const r = await submitAndVerify({
+          ap, entity, cached, preEditText,
+          expectedText: newContent,
+          ops, track: args.track,
+        });
         const replacements = args.replace_all ? indices.length : 1;
-        const trackingNote = serverWillTrack
-          ? (trackOverridden
-              ? "Submitted as a tracked change — `track:\"off\"` was overridden because the project has track_changes_on_for_me. The edit lands as a pending suggestion in Overleaf's Review panel."
-              : "Submitted as tracked changes — should appear as a pending suggestion in Overleaf's Review panel.")
-          : "Submitted as a direct edit (no tracking).";
 
-        let v: Awaited<ReturnType<typeof verifyEdit>> | undefined;
-        let verifyError: string | undefined;
-        try {
-          v = await verifyEdit(entity.id, preEditText, newContent, optimisticVersion);
-        } catch (e) {
-          verifyError = e instanceof Error ? e.message : String(e);
-        }
-        if (v) updateDoc(entity.id, v.serverText, v.serverVersion);
-        else updateDoc(entity.id, newContent, optimisticVersion);
-
-        if (v && v.silentNoOp) {
+        if (r.silentNoOp) {
           return {
             content: [{ type: "text", text:
               `Server acked the OT update for '${entity.path}' but the doc text is unchanged (silent no-op). ` +
               `\`old_string\` matched in your cached baseline, ops were sent and acked, but the server's doc didn't move — usually because a parallel agent or open editor bumped the version between your last read and this edit, and the server's OT transform collapsed your ops. ` +
-              `Cache is now synced to the real server state (v${v.serverVersion}). Re-call read_file and retry; consider \`strict_version: true\` to fail fast on stale baselines.`,
+              `Cache is now synced to the real server state (v${r.versionAfter}). Re-call read_file and retry; consider \`strict_version: true\` to fail fast on stale baselines.`,
             }],
             isError: true,
             structuredContent: {
@@ -237,30 +162,22 @@ export function registerFindAndReplace(server: McpServer): void {
               replacements: 0,
               ops_applied: ops.length,
               version_before: cached.version,
-              version_after: v.serverVersion,
-              tracked: serverWillTrack,
+              version_after: r.versionAfter,
+              tracked: r.serverWillTrack,
               track_mode: args.track,
-              track_overridden: trackOverridden,
+              track_overridden: r.trackOverridden,
               verification_failed: true,
               silent_no_op: true,
             },
           };
         }
 
-        const concurrentNote = v?.hadConcurrentWritesAfter
-          ? ` Note: server is at v${v.serverVersion} (> optimistic v${optimisticVersion}) — another writer landed updates after this edit; your op is in but the doc has moved on.`
-          : !v?.matchesExpected && v
-            ? ` Note: server text doesn't byte-match the predicted post-edit content (cache synced to actual server state at v${v.serverVersion}); the replace landed but may have been OT-transformed.`
-            : "";
-        const verifySkippedNote = verifyError ? ` (post-edit verification skipped: ${verifyError})` : "";
-        const versionAfter = v ? v.serverVersion : optimisticVersion;
-
         return {
           content: [{
             type: "text",
             text:
-              `Replaced ${replacements} occurrence(s) in '${entity.path}'. Doc version ${cached.version} -> ${versionAfter}. ` +
-              trackingNote + concurrentNote + verifySkippedNote,
+              `Replaced ${replacements} occurrence(s) in '${entity.path}'. Doc version ${cached.version} -> ${r.versionAfter}. ` +
+              r.trackingNote + r.concurrentNote + r.verifySkippedNote,
           }],
           structuredContent: {
             path: entity.path,
@@ -268,13 +185,13 @@ export function registerFindAndReplace(server: McpServer): void {
             replacements,
             ops_applied: ops.length,
             version_before: cached.version,
-            version_after: versionAfter,
-            tracked: serverWillTrack,
+            version_after: r.versionAfter,
+            tracked: r.serverWillTrack,
             track_mode: args.track,
-            track_overridden: trackOverridden,
-            verified: v ? v.matchesExpected : false,
-            had_concurrent_writes_after: v?.hadConcurrentWritesAfter ?? false,
-            verify_skipped: Boolean(verifyError),
+            track_overridden: r.trackOverridden,
+            verified: r.v ? r.v.matchesExpected : false,
+            had_concurrent_writes_after: r.v?.hadConcurrentWritesAfter ?? false,
+            verify_skipped: Boolean(r.verifyError),
           },
         };
       } catch (err) {

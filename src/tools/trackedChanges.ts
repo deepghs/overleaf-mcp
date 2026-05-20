@@ -2,10 +2,10 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import { asJson, olGet, olPostJson, expectOk } from "../api/http.js";
-import { getActiveProject } from "../session/activeProject.js";
+import { docPathById, getActiveProject } from "../session/activeProject.js";
 import type { RangesResponse, DocRange } from "../api/commentTypes.js";
 import type { MemberEntity } from "../api/projectTypes.js";
-import { applyOtUpdate, getActiveSocket, type OtUpdate } from "../api/socket.js";
+import { applyOtUpdate, getActiveSocket, joinDoc, type OtUpdate } from "../api/socket.js";
 import { getIdentity } from "../session/identity.js";
 import { generateIdSeed } from "../ot/trackedChanges.js";
 import { logger } from "../util/logger.js";
@@ -32,12 +32,6 @@ function memberMap(ap: NonNullable<ReturnType<typeof getActiveProject>>): Map<st
   };
   add(ap.project.owner);
   for (const u of ap.project.members ?? []) add(u);
-  return m;
-}
-
-function docPathById(ap: NonNullable<ReturnType<typeof getActiveProject>>): Map<string, string> {
-  const m = new Map<string, string>();
-  for (const e of ap.entities) if (e.kind === "doc") m.set(e.id, e.path);
   return m;
 }
 
@@ -114,12 +108,9 @@ async function rejectViaOt(docId: string, changes: FlatChange[]): Promise<void> 
   );
   const identity = await getIdentity();
   const sock = getActiveSocket();
-  // Version must be the current server version. We don't track it for arbitrary
-  // docs the way docCache does for ones we've joined for editing — but the
-  // server will still accept and transform if our v is slightly stale. Use 0
-  // is a no-go; better to joinDoc first to fetch the version.
-  // Easiest: just fetch via socket joinDoc to get latest version.
-  const { joinDoc } = await import("../api/socket.js");
+  // We don't keep a cache for arbitrary docs (only ones the agent has edited),
+  // so fetch the current version straight from the server before sending the
+  // inverse op.
   const fresh = await joinDoc(docId);
   const update: OtUpdate = {
     doc: docId,

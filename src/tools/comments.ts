@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import { asJson, olGet, olPostJson, expectOk } from "../api/http.js";
-import { getActiveProject } from "../session/activeProject.js";
+import { docPathById, getActiveProject } from "../session/activeProject.js";
 import type { CommentThread, ThreadsByIdResponse, RangesResponse } from "../api/commentTypes.js";
 import { logger } from "../util/logger.js";
 
@@ -20,7 +20,7 @@ interface EnrichedThread {
   full_thread?: CommentThread;
 }
 
-async function fetchThreadsEnriched(projectId: string, entitiesByDocId: Map<string, { path: string }>): Promise<EnrichedThread[]> {
+async function fetchThreadsEnriched(projectId: string, docPaths: Map<string, string>): Promise<EnrichedThread[]> {
   const [threadsRes, rangesRes] = await Promise.all([
     olGet(`project/${projectId}/threads`),
     olGet(`project/${projectId}/ranges`),
@@ -49,7 +49,7 @@ async function fetchThreadsEnriched(projectId: string, entitiesByDocId: Map<stri
     out.push({
       thread_id: threadId,
       doc_id: anchor?.doc_id,
-      doc_path: anchor?.doc_id ? entitiesByDocId.get(anchor.doc_id)?.path : undefined,
+      doc_path: anchor?.doc_id ? docPaths.get(anchor.doc_id) : undefined,
       quoted_text: anchor?.c,
       position: anchor?.p,
       resolved: Boolean(thread.resolved),
@@ -81,14 +81,6 @@ const ReplySchema = ThreadIdSchema.extend({
   content: z.string().min(1).describe("The reply text to post in the thread."),
 });
 
-function entitiesByDocId(ap: NonNullable<ReturnType<typeof getActiveProject>>): Map<string, { path: string }> {
-  const m = new Map<string, { path: string }>();
-  for (const e of ap.entities) {
-    if (e.kind === "doc") m.set(e.id, { path: e.path });
-  }
-  return m;
-}
-
 export function registerComments(server: McpServer): void {
   server.registerTool(
     "list_comments",
@@ -105,7 +97,7 @@ export function registerComments(server: McpServer): void {
       const ap = getActiveProject();
       if (!ap) return { content: [{ type: "text", text: "No project is open. Call open_project first." }], isError: true };
       try {
-        let threads = await fetchThreadsEnriched(ap.projectId, entitiesByDocId(ap));
+        let threads = await fetchThreadsEnriched(ap.projectId, docPathById(ap));
         if (!args.include_resolved) threads = threads.filter((t) => !t.resolved);
         if (args.path_contains) {
           const needle = args.path_contains.toLowerCase();

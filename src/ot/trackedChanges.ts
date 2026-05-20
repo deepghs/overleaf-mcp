@@ -18,3 +18,22 @@ export function generateIdSeed(): string {
   const ts = hexPad(Math.floor(Date.now() / 1000), 8);
   return ts + machine + pid;
 }
+
+export const TRACK_MODES = ["auto", "on", "off"] as const;
+export type TrackMode = typeof TRACK_MODES[number];
+
+// Resolve what the SERVER will do given the caller's `track` request and the
+// project's per-user setting. `serverWillTrack` is what we report in `tracked`;
+// `trackOverridden` flags the specific case where the caller said "off" but
+// the project's `track_changes_on_for_me: true` forced tracking anyway.
+export function resolveTracking(
+  track: TrackMode,
+  trackChangesOnForMe: boolean,
+): { shouldTrack: boolean; serverWillTrack: boolean; trackOverridden: boolean } {
+  const shouldTrack = track === "on" ? true : track === "off" ? false : trackChangesOnForMe;
+  return {
+    shouldTrack,
+    serverWillTrack: shouldTrack || trackChangesOnForMe,
+    trackOverridden: track === "off" && trackChangesOnForMe,
+  };
+}

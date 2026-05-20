@@ -21,10 +21,6 @@ export function updateDoc(docId: string, newText: string, newVersion: number): v
   docs.set(docId, { docId, text: newText, version: newVersion });
 }
 
-export function getDoc(docId: string): CachedDoc | undefined {
-  return docs.get(docId);
-}
-
 export function clearDocCache(): void {
   docs.clear();
 }

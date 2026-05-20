@@ -61,3 +61,9 @@ export function findByPath(path: string): FlatEntity | undefined {
   const normalized = path.replace(/^\/+/, "");
   return active.entities.find((e) => e.path === normalized);
 }
+
+export function docPathById(ap: ActiveProject): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const e of ap.entities) if (e.kind === "doc") m.set(e.id, e.path);
+  return m;
+}
