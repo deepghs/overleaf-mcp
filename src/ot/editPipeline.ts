@@ -5,8 +5,7 @@
 // freshness checks, OT submit, post-edit verify, cache sync, response notes —
 // is identical and lives here.
 
-import { applyOtUpdate, getActiveSocket, type OtUpdate } from "../api/socket.js";
-import { getIdentity } from "../session/identity.js";
+import { applyOtUpdate, type OtUpdate } from "../api/socket.js";
 import { ensureDocLoaded, updateDoc, type CachedDoc } from "../session/docCache.js";
 import { findByPath, getActiveProject, type ActiveProject } from "../session/activeProject.js";
 import type { FlatEntity } from "../api/projectTypes.js";
@@ -121,16 +120,11 @@ export interface SubmitResult {
 // Tool-specific work (per-tool structuredContent shape, per-tool prose) is
 // the caller's responsibility.
 export async function submitAndVerify(opts: SubmitOpts): Promise<SubmitResult> {
-  const identity = await getIdentity();
-  const sock = getActiveSocket();
   const { shouldTrack, serverWillTrack, trackOverridden } = resolveTracking(opts.track, opts.ap.trackChangesOnForMe);
-  const meta: NonNullable<OtUpdate["meta"]> = {
-    source: sock?.publicId ?? "overleaf-mcp",
-    ts: Date.now(),
-    user_id: identity.userId,
-  };
-  if (shouldTrack) meta.tc = generateIdSeed();
-  const update: OtUpdate = { doc: opts.entity.id, op: opts.ops, v: opts.cached.version, meta };
+  const update: OtUpdate = { doc: opts.entity.id, op: opts.ops, v: opts.cached.version };
+  // `tc` is the only meta key the server accepts from a client; when we're not
+  // tracking, send no `meta` at all (same as the web client with review off).
+  if (shouldTrack) update.meta = { tc: generateIdSeed() };
   await applyOtUpdate(opts.entity.id, update);
   const optimisticVersion = opts.cached.version + 1;
   const trackingNote = serverWillTrack

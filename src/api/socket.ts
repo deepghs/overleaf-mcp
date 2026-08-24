@@ -29,7 +29,10 @@ export interface OtUpdate {
   v: number;
   lastV?: number;
   hash?: string;
-  meta?: { source: string; ts: number; user_id: string; tc?: string };
+  // Only `tc` may be client-supplied. The real-time service sets
+  // `meta.source` / `meta.user_id` / `meta.tsRT` itself and its zod schema
+  // rejects the update outright if we send them ("Unrecognized keys").
+  meta?: { tc: string };
 }
 
 interface JoinDocResult {
