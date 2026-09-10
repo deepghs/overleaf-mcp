@@ -13,6 +13,8 @@ import { registerFindAndReplace } from "./tools/findAndReplace.js";
 import { registerCompile, registerReadLog } from "./tools/compile.js";
 import { registerComments } from "./tools/comments.js";
 import { registerTrackedChanges } from "./tools/trackedChanges.js";
+import { registerFileManagement } from "./tools/fileManagement.js";
+import { registerAddComment } from "./tools/addComment.js";
 import { close as closeActiveProject } from "./session/activeProject.js";
 import { maybeRunCli } from "./auth/cli.js";
 import { logger } from "./util/logger.js";
@@ -34,6 +36,12 @@ const INSTRUCTIONS = [
   "  2. open_project(id) -> joins the Socket.IO room, returns file tree + tc state",
   "  3. read_file / edit_file by path (e.g. 'chapters/intro.tex')",
   "  4. compile to verify edits build",
+  "  5. download_output to save PDF/log, download_project for ZIP, download_file for snapshots",
+  "File management: create_folder, create_file, upload_file (new binary assets only), rename_entity, delete_entity.",
+  "Never use file upload as a fallback for document editing. Existing text must use tracked OT.",
+  "add_comment requires unique selected_text and expected_version from read_file.",
+  "Serialize file management with other operations; re-read documents after tree changes.",
+  "After stale-version rejection, re-read and recompute changes; never retry old new_content against a refreshed cache.",
   "",
   "Auth UX (important for the user-facing message):",
   "If no session cookie is stored yet, or the previous one has expired (Overleaf",
@@ -76,6 +84,8 @@ async function main(): Promise<void> {
   registerReadLog(server);
   registerComments(server);
   registerTrackedChanges(server);
+  registerFileManagement(server);
+  registerAddComment(server);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

@@ -1,7 +1,8 @@
 {
-  "name": "@netique/overleaf-mcp",
+  "name": "@deepghs/overleaf-mcp",
+  "private": true,
   "version": "0.3.6",
-  "description": "MCP server for Overleaf with tracked-changes support, via the Socket.IO web API (not the Git bridge).",
+  "description": "Overleaf MCP with tracked OT editing, anchored comments, file management, and downloads; based on netique/overleaf-mcp.",
   "type": "module",
   "bin": {
     "overleaf-mcp": "./dist/index.js"
@@ -13,11 +14,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/netique/overleaf-mcp.git"
+    "url": "git+https://github.com/deepghs/overleaf-mcp.git"
   },
-  "homepage": "https://github.com/netique/overleaf-mcp#readme",
+  "homepage": "https://github.com/deepghs/overleaf-mcp#readme",
   "bugs": {
-    "url": "https://github.com/netique/overleaf-mcp/issues"
+    "url": "https://github.com/deepghs/overleaf-mcp/issues"
   },
   "publishConfig": {
     "access": "public"

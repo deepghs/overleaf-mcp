@@ -3,6 +3,12 @@ dist/
 *.log
 .env
 .env.local
+.env.*
+!.env.example
+.olauth
+cookie.json
+chrome-profile/
+artifacts-*/
 .DS_Store
 .tsbuildinfo
 *.tsbuildinfo

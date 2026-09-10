@@ -25,7 +25,7 @@ import { logger } from "../util/logger.js";
 
 export interface OtUpdate {
   doc: string;
-  op?: Array<{ p: number; i?: string; d?: string; u?: boolean }>;
+  op?: Array<{ p: number; i?: string; d?: string; u?: boolean; c?: string; t?: string }>;
   v: number;
   lastV?: number;
   hash?: string;

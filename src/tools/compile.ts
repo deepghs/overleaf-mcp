@@ -37,7 +37,7 @@ export function summarizeErrors(
 
 // Build the GET-able URL for an output file from a compile response, including
 // the clsiserverid + compileGroup query params CLSI requires.
-function buildOutputUrl(file: OutputFile, last: CompileResponse): string {
+export function buildOutputUrl(file: OutputFile, last: CompileResponse): string {
   const params = new URLSearchParams();
   if (last.clsiServerId) params.set("clsiserverid", last.clsiServerId);
   if (last.compileGroup) params.set("compileGroup", last.compileGroup);
@@ -79,7 +79,7 @@ export function registerCompile(server: McpServer): void {
           check: "silent",
           draft: args.draft,
           incrementalCompilesEnabled: true,
-          rootResourcePath: args.root_doc ?? null,
+          ...(args.root_doc ?? ap.rootDocPath ? { rootResourcePath: args.root_doc ?? ap.rootDocPath } : {}),
           stopOnFirstError: args.stop_on_first_error,
         };
         const res = await olPostJson(`project/${ap.projectId}/compile?auto_compile=true`, body);

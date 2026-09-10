@@ -1,179 +1,254 @@
-# overleaf-mcp
+# Overleaf MCP by deepghs
 
-An MCP server for [Overleaf](https://www.overleaf.com) that lets a Claude or other agent navigate projects, read/edit `.tex` files, compile, and work with review-panel comments — over Overleaf's **real web/Socket.IO API**, the same channel the official web editor uses.
+Collaborative LaTeX editing through MCP: native tracked changes, review comments,
+compilation, downloads, and file management in one connection.
 
-The one feature no existing Overleaf MCP can deliver: when a project has **track-changes** enabled, the agent's edits appear as **pending suggestions in the Review panel**, the same way a human collaborator's edits do. You and your collaborators can accept or reject each suggestion. You can also ask the agend to accept/reject them (e.g. *"accept all suggestions about typos"*).
+Based on [netique/overleaf-mcp](https://github.com/netique/overleaf-mcp), with its
+Git history and AGPL license preserved. This version adds **nine tools**, for
+**26 tools total**. Document edits use Overleaf's Socket.IO OT protocol rather
+than whole-file uploads or the Git bridge. This is an unofficial integration,
+not an Overleaf-supported API.
 
-## Why a new MCP
+## What This Version Adds
 
-The three existing Overleaf MCPs ([mjyoo2/overleafmcp](https://github.com/mjyoo2/overleafmcp), [YounesBensafia/overleaf-mcp-server](https://github.com/YounesBensafia/overleaf-mcp-server), [GhoshSrinjoy/Overleaf-mcp](https://github.com/GhoshSrinjoy/Overleaf-mcp)) all write through Overleaf's **Git bridge**, which has two problems for collaborative academic work:
+- Download document snapshots, binary assets, project ZIPs, PDFs, and compile logs.
+- Create empty documents and folders, upload new assets, rename and delete files.
+- Create native comments on unique selected text, with version checks and
+  message/anchor readback verification.
+- Preserve the upstream tracked OT pathway for existing document text.
+- Fix self-hosted compilation requests that reject a null root document path.
 
-1. Commits show up in Overleaf with delay (the bridge polls).
-2. Git-bridge writes **bypass tracked changes entirely** — even when track-changes mode is on, edits land as direct overwrites, not as suggestions for review.
-
-The [`overleaf-workshop`](https://github.com/overleaf-workshop/overleaf-workshop) VSCode extension already uses Overleaf's Socket.IO API rather than Git, but doesn't yet emit tracked changes ([issue #94](https://github.com/overleaf-workshop/overleaf-workshop/issues/94)).
-
-`overleaf-mcp` solves both: a minimal Socket.IO 0.9 client over `fetch` + `ws@8`, plus the `meta.tc` ID seed on `applyOtUpdate` that flips Overleaf's server-side `RangesTracker` into track-changes mode.
-
-## Status
-
-Working end-to-end against `overleaf.com` — 16 tools, tracked-changes edits and review-panel comments both verified. Published on npm as [`@netique/overleaf-mcp`](https://www.npmjs.com/package/@netique/overleaf-mcp).
-
-## Tools
-
-| Tool | Description |
-|---|---|
-| `ping` | Health check. Does not contact Overleaf. |
-| `list_projects` | Lists projects on the configured account, sorted by most recently updated. Supports `name_contains`, `include_archived`, `include_trashed`, `limit`. |
-| `open_project` | Joins a project's real-time session and caches its file tree. Returns rich metadata: `root_doc_path`, `compiler`, `spell_check_language`, `public_access_level`, owner + members (with privileges), and whether track-changes is on for your user. |
-| `list_files` | Lists the file tree of the open project (cached, no network). Filter by `kind` and `path_contains`. |
-| `read_file` | Reads a doc (returns text + OT version + a summary of tracked changes / comments) or a binary file (base64 + MIME). `path` is optional — defaults to the project's root doc. |
-| `edit_file` | Replaces a doc's contents. Computes a minimal diff via `diff-match-patch`, submits it as an OT operation, and adds `meta.tc` so the edit lands as a pending suggestion in the Review panel by default. Pass `track: "off"` to write directly or `track: "auto"` to honor the project's track-changes setting. `path` is optional — defaults to the project's root doc. |
-| `find_and_replace` | Surgical edit: replace one occurrence (or all, with `replace_all: true`) of `old_string` with `new_string` without re-emitting the rest of the doc. Cheaper in tokens than `edit_file` for targeted changes and avoids whitespace drift from re-emitting surrounding text. By default `old_string` must be unique; ambiguous matches return a list of line:col locations so you can extend the match. Same `track` defaults and OT path as `edit_file`, so it lands as a pending suggestion in the Review panel. |
-| `list_tracked_changes` | Enumerates every pending tracked-change suggestion across the open project, with author name + email, doc path, op kind (insert/delete), position, op text, change_id. Filter by `author_email`, `author_id_endswith`, `path_contains`, `kind`, `text_contains`, `limit`. |
-| `accept_changes` | Accepts one or more tracked changes by `change_id` (from `list_tracked_changes`). Multi-doc groups are batched automatically. Irreversible. |
-| `reject_changes` | Rejects one or more tracked changes by `change_id`. Implemented as `applyOtUpdate` with the inverse op + `u:true` (same pathway Overleaf's web client uses). Irreversible. |
-| `compile` | Triggers an Overleaf compile and returns a unified summary: `status`, `built_cleanly` (true iff PDF + zero LaTeX errors), `error_count`, `warning_count`, `first_errors` (sample), `output_files`, timings. Already fetches and parses `output.log` inline — no extra `read_log` call needed for the happy path. Pass `root_doc`, `draft`, `stop_on_first_error` to control. |
-| `read_log` | Returns the full `output.log` from the most recent compile, with `!`-prefixed error lines surfaced at the top. Use when `compile`'s inline summary isn't enough context. |
-| `list_comments` | Lists review-panel comment threads with doc path, quoted text, author, latest-message preview. Supports `include_resolved`, `path_contains`, `full`. |
-| `read_comment_thread` | Returns the full message history of one thread. |
-| `reply_comment` | Posts a new message to an existing thread. |
-| `resolve_comment` | Marks a thread resolved. |
-| `reopen_comment` | Reopens a resolved thread. |
-
-## Typical workflow
-
-Things to ask Claude once `overleaf-mcp` is connected:
-
-- _"Accept every pending tracked change by John Doe that's only adjusting punctuation or whitespace."_ — uses `list_tracked_changes(author_email: "...")` → LLM filters by op text → `accept_changes(...)`.
-- _"List my recent Overleaf projects."_
-- _"Open my thesis project and show me what comments my collaborators have left."_
-- _"Read intro.tex and fix the missing comma in the second paragraph."_  → with track-changes on, this lands as a tracked suggestion.
-- _"Compile the project and tell me what the LaTeX errors mean."_  → uses `compile` then `read_log` automatically.
-- _"For each open comment thread, suggest a fix and reply with what you did."_  → end-to-end review workflow.
+**Source installation only.** `npx @netique/overleaf-mcp` runs upstream, not this
+enhanced version. This repository is not published to npm; build it locally.
 
 ## Requirements
 
-- Node ≥ 20
-- An Overleaf account (overleaf.com or self-hosted Community Edition)
+- Node.js 20 or newer and npm.
+- A reachable Overleaf deployment and an authorized project account.
+- Server support for tracked changes and comments to use those features;
+  self-hosting alone does not guarantee they are enabled.
+- A supported Chromium-family browser for interactive login.
 
-## Quick start
+## Installation
 
-No local install needed — `npx` fetches and runs the latest version. Add this to your Claude Desktop / Claude Code MCP config:
-
-```json
-{
-  "mcpServers": {
-    "overleaf": {
-      "command": "npx",
-      "args": ["-y", "@netique/overleaf-mcp"]
-    }
-  }
-}
-```
-
-The first MCP tool call (or `npx @netique/overleaf-mcp login` run ahead of time) opens a Chrome window pointed at Overleaf — log in normally and the session cookie is captured and saved to a file under your config dir. No DevTools paste, no cookie in your MCP config. When the cookie expires (~5 days), the next tool call re-opens the window and refreshes it.
-
-For self-hosted Community Edition: set `OL_BASE_URL`:
-
-```json
-{
-  "mcpServers": {
-    "overleaf": {
-      "command": "npx",
-      "args": ["-y", "@netique/overleaf-mcp"],
-      "env": { "OL_BASE_URL": "https://overleaf.mylab.edu" }
-    }
-  }
-}
-```
-
-Useful one-shot commands:
-
-```sh
-npx @netique/overleaf-mcp login              # opens Chrome, captures cookie
-npx @netique/overleaf-mcp status             # who am I logged in as
-npx @netique/overleaf-mcp logout --confirm   # clear the saved cookie
-```
-
-<details>
-<summary>From source (for development)</summary>
-
-```sh
-git clone https://github.com/netique/overleaf-mcp.git
+```bash
+git clone https://github.com/deepghs/overleaf-mcp.git
 cd overleaf-mcp
-npm install
+npm ci
 npm run build
+npm test
 ```
 
-Then point your MCP config at the built file:
+If the repository is private, authenticate Git with an account that has access.
+Keep the checkout at a stable path. Rebuild after pulling changes and restart
+your MCP client to load the new code.
+
+## Authentication
+
+For a self-hosted instance, use the same origin for login and MCP configuration:
+
+```bash
+OL_BASE_URL=https://overleaf.example.org node dist/index.js login
+OL_BASE_URL=https://overleaf.example.org node dist/index.js status
+```
+
+For hosted Overleaf, omit `OL_BASE_URL`. Login opens an isolated browser profile;
+sign in there. Missing or expired credentials may trigger the same flow on a
+tool call. CSRF tokens are normally discovered automatically.
+
+Cookies are plaintext in `<configDir>/overleaf-mcp/cookie.json`, with mode `0600`
+where supported. On Linux, `configDir` is `$XDG_CONFIG_HOME` or `~/.config`; on
+macOS it is `~/Library/Application Support`; on Windows it is `%APPDATA%`.
+Never commit this store or its dedicated browser profile.
+
+Use a dedicated collaborator account for clear attribution and limited project
+access. Otherwise edits and comments use the authenticated human's identity.
+
+## MCP Configuration
+
+### Codex
+
+Replace the example origin and absolute path:
+
+```bash
+codex mcp add overleaf \
+  --env OL_BASE_URL=https://overleaf.example.org \
+  -- node /absolute/path/to/overleaf-mcp/dist/index.js
+```
+
+Equivalent TOML:
+
+```toml
+[mcp_servers.overleaf]
+command = "node"
+args = ["/absolute/path/to/overleaf-mcp/dist/index.js"]
+
+[mcp_servers.overleaf.env]
+OL_BASE_URL = "https://overleaf.example.org"
+```
+
+### JSON-Based Clients
 
 ```json
 {
   "mcpServers": {
     "overleaf": {
       "command": "node",
-      "args": ["/absolute/path/to/overleaf-mcp/dist/index.js"]
+      "args": ["/absolute/path/to/overleaf-mcp/dist/index.js"],
+      "env": { "OL_BASE_URL": "https://overleaf.example.org" }
     }
   }
 }
 ```
-</details>
 
-## Authentication
+Use an absolute Node executable path if the client cannot resolve `node`.
+Restart the client after replacing a server configuration.
 
-The session cookie lives in a plaintext file at `<configDir>/overleaf-mcp/cookie.json` (mode 0600), where `<configDir>` is `~/Library/Application Support` on macOS, `$XDG_CONFIG_HOME` (or `~/.config`) on Linux, `%APPDATA%` on Windows. The CSRF token is auto-discovered from the `/project` page on each session — no separate copy needed.
+## Tool Reference
 
-### How the cookie gets there
+Project-scoped tools use the project selected by `open_project`.
 
-`npx @netique/overleaf-mcp login` — or an MCP tool call that finds no stored cookie — spawns Chrome with a **dedicated browser profile** at `<configDir>/overleaf-mcp/chrome-profile/`, points it at `${OL_BASE_URL}/project`, and reads the session cookie via the Chrome DevTools Protocol once the dashboard loads. Why a dedicated profile:
+| Group | Tools | Purpose |
+| --- | --- | --- |
+| Discovery | `ping`, `list_projects`, `open_project`, `list_files` | Inspect projects and the cached tree |
+| Editing | `read_file`, `edit_file`, `find_and_replace` | Read text/version and submit minimal tracked OT edits |
+| Review | `list_tracked_changes`, `accept_changes`, `reject_changes` | Inspect and review pending suggestions |
+| Comments | `list_comments`, `read_comment_thread`, `add_comment`, `reply_comment`, `resolve_comment`, `reopen_comment` | Native review-panel threads |
+| Compilation | `compile`, `read_log` | Remote build and diagnostics |
+| Downloads | `download_file`, `download_project`, `download_output` | Local snapshots, ZIP, or compile artifacts |
+| Files | `create_file`, `create_folder`, `upload_file`, `rename_entity`, `delete_entity` | Tree management without uploading over existing text |
 
-- We don't touch your real Chrome profile, so there's no macOS Keychain prompt for your everyday browser.
-- It's a real interactive Chrome window, so captcha, Google OAuth, ORCID, institutional SSO and 2FA all work out of the box.
-- The profile persists. Re-logins are usually a flash: window opens → /project loads → cookie captured → window closes.
+### Added Tool Arguments
 
-When the cookie expires (Overleaf cookies last ~5 days), the next request hits a 302 to `/login`, overleaf-mcp evicts the stale entry, re-launches Chrome and captures a fresh one. If your browser session also expired, the Chrome window waits for you to log in (up to 5 minutes).
+| Tool | Required arguments | Constraints / optional arguments |
+| --- | --- | --- |
+| `download_file` | `path`, `output_path` | Existing text or binary file |
+| `download_project` | `output_path` | ZIP only, no extraction |
+| `download_output` | `output_path` | Optional `artifact`, default `output.pdf`; compile first |
+| `create_file` | `path` | Empty document; parent must exist |
+| `create_folder` | `path` | Single folder; parent must exist |
+| `upload_file` | `path`, `local_path` | New PNG/JPEG/GIF/WebP/PDF/EPS/ZIP assets only |
+| `rename_entity` | `path`, `new_name` | Basename in the same parent; target must not exist |
+| `delete_entity` | `path`, `confirm` | Requires `confirm: true`; refuses nonempty folders |
+| `add_comment` | `path`, `selected_text`, `content`, `expected_version` | Unique text and the version from `read_file` |
 
-Any Chromium-family browser works — Chrome, Brave, Edge, Arc, Chromium. If `findChrome` can't locate one automatically, set `OL_BROWSER` to a binary path.
+Remote paths are project-relative. `local_path` and `output_path` must be
+absolute. Downloads require an existing parent and never overwrite a destination,
+including a symlink at the destination path.
 
-> ⚠️ The session cookie grants full account access. The cookie file is mode 0600 but plaintext on disk. Treat it like a password. Remove it with `overleaf-mcp logout --confirm`.
+## Recommended Workflow
 
-### Environment variables
+1. Open the project and read the target document and relevant comments.
+2. Edit with `track: "on"`, `expected_version` from the read, and
+   `strict_version: true` when other writers are active.
+3. On stale-version rejection, **read again and recompute the edit**. Upstream
+   refreshes its cache on rejection; blindly retrying old `new_content` against
+   that cache can remove another writer's new text.
+4. Read back the result, compile, inspect diagnostics, and download the PDF.
+5. Reply to the relevant thread. Leave suggestions and threads pending until
+   the author explicitly requests acceptance or resolution.
 
-| Var | Default | Notes |
-|---|---|---|
-| `OL_BASE_URL` | `https://www.overleaf.com` | Override for self-hosted Overleaf. |
-| `OL_BROWSER` | auto-detected | Path to a Chromium-family browser if auto-detection fails (Chrome / Brave / Edge / Arc / Chromium). |
-| `OL_INSECURE` | — | Set to `1` to pass `--ignore-certificate-errors` to the captured Chrome instance — for self-hosted CE with a self-signed cert. |
-| `OL_CSRF` | auto-discovered | Force a specific CSRF token. Only needed if your server doesn't ship the `ol-csrfToken` meta tag. |
-| `OL_MCP_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error`. Goes to stderr; stdout is reserved for MCP JSON-RPC. |
+Example requests:
+
+> Improve the introduction as tracked changes. Preserve citations and factual
+> claims. Re-read and recompute if the document version changes.
+
+> Add a comment on this unique sentence explaining the missing experimental
+> detail. Do not change the document text.
+
+> Compile the open project and download output.pdf and output.log to these
+> absolute paths without overwriting existing files.
+
+## Safety and Compatibility
+
+- **No upload fallback for text.** Uploads refuse existing targets and text files.
+  Create empty documents, then insert their content through tracked OT.
+- Tree mutations refresh the remote tree and invalidate document caches. Re-read
+  text afterward. File-management calls are serialized with each other within
+  one process, not with every upstream tool. Do not overlap them with project
+  switching or text edits.
+- Remote filename checks are not atomic with server writes. Do not create the
+  same filename simultaneously from different clients; cross-client races are
+  not covered by the collision guard.
+- A comment message and its anchor are separate writes. Partial failures return
+  a thread ID to inspect before retrying; creation is not transactional.
+- Verification covers the upstream ShareJS path, not history-OT compatibility.
+  This fork does not add live cursors or complete browser presence behavior.
+- OT preserves independent operations, not semantic agreement about a sentence.
+  Reconnection and every possible concurrency failure mode are not certified.
+- A PDF may be generated despite LaTeX errors. Inspect `error_count` and the log.
+  A missing/unreadable log is not proof of a clean build, even if upstream
+  reports `built_cleanly`.
+- Cookies grant account access. Use trusted MCP clients, authorized accounts,
+  and automation consistent with the deployment's applicable terms.
+
+## Environment Variables
+
+| Variable | Purpose |
+| --- | --- |
+| `OL_BASE_URL` | Origin; defaults to `https://www.overleaf.com` |
+| `OL_BROWSER` | Explicit Chromium-family browser executable |
+| `OL_CSRF` | Optional CSRF override |
+| `OL_MCP_LOG_LEVEL` | `debug`, `info`, `warn`, `error`; logs go to stderr |
+| `OL_INSECURE` | Browser-login certificate exception; avoid normally and do not assume it fixes Node TLS |
+
+## Tests and Development
+
+```bash
+npm run typecheck
+npm run build
+npm test
+git diff --check
+```
+
+On September 10, 2026, this version passed **25 unit tests** and live MCP stdio
+tests against a self-hosted deployment. Coverage included tracked insertion,
+anchored comment readback, stale-version rejection, binary byte roundtrips,
+file-management protections, PDF/log/ZIP downloads, and two-client OT merging
+at different positions. This was not browser visual QA or exhaustive testing of
+every upstream tool or every Overleaf version.
+
+The opt-in integration test **modifies its supplied disposable project** and
+leaves review evidence there. It imports an existing olcli credential into an
+isolated cookie store after checking its origin:
+
+```bash
+export OL_BASE_URL=https://overleaf.example.org
+export OL_TEST_COOKIE_CONFIG=/absolute/path/to/olcli-nodejs/config.json
+export XDG_CONFIG_HOME="$(mktemp -d)"
+node tests/manual/extensions.mjs DISPOSABLE_PROJECT_ID
+```
+
+Protect that isolated directory: it contains authentication state and downloaded
+artifacts. Never run this test against a production manuscript.
+
+Run `npm audit` before deployment. The inherited lockfile had dependency
+advisories during verification; this feature branch did not resolve them.
+No npm publication or production security certification is implied.
 
 ## Troubleshooting
 
-**`OverleafAuthError: Session cookie rejected (redirected to /login)`** — your stored cookie has expired. overleaf-mcp relaunches Chrome automatically on the next tool call to refresh; you should only see this surface as a user-facing error if Chrome itself failed to start.
+- **Missing tools:** build this checkout and point the client to its entry point,
+  not upstream npm or the olcli executable.
+- **Login required:** use the same `OL_BASE_URL` for login and MCP configuration.
+- **Missing parent / existing destination:** create parents first and choose a
+  new filename; edit existing text through OT.
+- **Output unavailable:** compile the currently open project, then choose a
+  filename listed in `output_files`.
+- **No tracked suggestions:** check project/user settings and server feature
+  support; do not silently fall back to untracked uploads.
 
-**`No Chromium-family browser found`** — install Chrome (or Brave/Edge/Arc/Chromium), or set `OL_BROWSER` to a binary path.
+## Attribution and License
 
-**`Socket.IO handshake returned 502`** — Overleaf's load balancer rejected the WebSocket upgrade. Usually means the cookie was rejected — `overleaf-mcp` should auto-recover on the next tool call.
+**AGPL-3.0-or-later**, see [LICENSE](LICENSE). Preserve notices and comply with
+the license when distributing or operating modifications.
 
-**`Could not find ol-csrfToken meta tag`** — your Overleaf server doesn't expose the CSRF meta tag (rare; mostly very old Community Edition). Set `OL_CSRF` explicitly.
+- [netique/overleaf-mcp](https://github.com/netique/overleaf-mcp): upstream server,
+  authentication, OT editing, tracked-change review, and comment operations.
+- [overleaf-workshop](https://github.com/overleaf-workshop/overleaf-workshop) and
+  [overleaf/overleaf](https://github.com/overleaf/overleaf): protocol and code
+  sources acknowledged by the original project.
+- [googlecolab/colab-mcp](https://github.com/googlecolab/colab-mcp): upstream UX reference.
 
-**Edits land but don't show up as tracked suggestions** — confirm track-changes is on for *your user* on this project (Menu → Settings → Track Changes → "For me" or "For everyone"). `open_project` reports the detected state under `track_changes_on_for_me`. To force tracking regardless, pass `track: "on"` to `edit_file`.
-
-**Compile succeeds but `read_log` returns 404** — Overleaf needs `?clsiserverid=...` to route to the right CLSI worker; we add this automatically from the previous compile response. If you see this, the previous compile may not have completed; re-run `compile` and then `read_log`.
-
-## Acknowledgements
-
-- [`overleaf-workshop`](https://github.com/overleaf-workshop/overleaf-workshop) by @iamhyc and contributors — protocol reference for the HTTP + Socket.IO flow, comment thread endpoints. The `94-review-panel` branch was the source for the comment data shapes.
-- [`overleaf/overleaf`](https://github.com/overleaf/overleaf) — `libraries/ranges-tracker/index.cjs` and `services/document-updater/RangesManager.js` are the authoritative source for how tracked changes are emitted (the `update.meta.tc` flag and ID seed format).
-- [`googlecolab/colab-mcp`](https://github.com/googlecolab/colab-mcp) — UX reference for what an agent-friendly MCP into a hosted editor should feel like.
-
-## License
-
-**AGPL-3.0-or-later** — see [`LICENSE`](./LICENSE).
-
-overleaf-mcp incorporates code ported from two AGPL-3.0 projects (overleaf-workshop and overleaf/overleaf — see Acknowledgements), so the combined work is distributed under the same terms. Practical implications:
-
-- You can use, study, and modify overleaf-mcp freely.
-- If you redistribute it, modified or not, recipients must also receive the source under AGPL-3.0.
-- If you run a **modified** version as a network service that users interact with, you must make the modified source available to those users. Running unmodified overleaf-mcp as your own personal MCP server is unaffected.
+The additions use existing server abstractions; no olcli implementation was
+copied. olcli credentials are only an optional input to the integration test.
