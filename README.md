@@ -23,7 +23,7 @@ enhanced version. This repository is not published to npm; build it locally.
 
 ## Requirements
 
-- Node.js 20 or newer and npm.
+- Node.js 20.18.1 or newer and npm (Node 22 LTS recommended).
 - A reachable Overleaf deployment and an authorized project account.
 - Server support for tracked changes and comments to use those features;
   self-hosting alone does not guarantee they are enabled.
@@ -44,6 +44,36 @@ Keep the checkout at a stable path. Rebuild after pulling changes and restart
 your MCP client to load the new code.
 
 ## Authentication
+
+### SSH / Headless Servers
+
+For self-hosted instances with ordinary email/password login:
+
+```bash
+export OL_BASE_URL=https://overleaf.example.org
+node dist/index.js login --password
+# Or prefill the email only:
+node dist/index.js login --email user@example.org
+node dist/index.js status
+```
+
+The interactive terminal prompts for email and a hidden password. `--password`
+is a mode switch, NOT a password argument. Never put passwords on the command
+line. Only the validated session cookie is saved; passwords are not persisted.
+Failed login leaves any existing saved session unchanged. Use `ssh -t` when
+your SSH invocation does not allocate a terminal.
+
+On Linux without DISPLAY/WAYLAND_DISPLAY, plain `login` selects password mode
+automatically. Set `OL_HEADLESS=1` to disable automatic browser login explicitly.
+Missing/expired credentials during MCP calls produce instructions to log in
+from SSH; the MCP stdio stream is never used for password prompts.
+
+This requires HTTPS and a server that accepts password login without CAPTCHA,
+SSO or 2FA. It does not bypass those challenges. Session expiry still requires
+another interactive login; no stored password or automatic password renewal.
+For interactive browser authentication use `login --browser` on a desktop.
+
+### Desktop Browser Login
 
 For a self-hosted instance, use the same origin for login and MCP configuration:
 

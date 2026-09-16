@@ -1,6 +1,5 @@
 // `overleaf-mcp login | logout | status` subcommands. Invoked before the
-// MCP stdio server boots. `login` always launches a Chrome window pointed
-// at Overleaf and captures the session cookie via CDP — no paste path.
+// MCP stdio server boots. Supports isolated browser or interactive password login.
 
 import { stdin, stdout } from "node:process";
 
@@ -9,6 +8,7 @@ import { validateCookie, clearIdentity } from "../session/identity.js";
 import { OverleafAuthError } from "../api/errors.js";
 import { saveStored, clearStored, loadStored, cookieFilePath } from "./cookieStore.js";
 import { captureCookie } from "./browserLogin.js";
+import { browserLoginAvailable, promptPasswordLogin } from "./passwordLogin.js";
 
 function writeOut(line: string): void {
   stdout.write(`${line}\n`);
@@ -18,8 +18,33 @@ function hostOf(baseUrl: string): string {
   return new URL(baseUrl).host;
 }
 
-async function runLogin(): Promise<number> {
+async function runLogin(argv: string[]): Promise<number> {
   const config = loadConfig();
+  let email: string | undefined;
+  let usePassword = false;
+  let browser = false;
+  for (let i = 3; i < argv.length; i++) {
+    if (argv[i] === "--password") usePassword = true;
+    else if (argv[i] === "--browser") browser = true;
+    else if (argv[i] === "--email" && argv[i + 1] && !argv[i + 1].startsWith("--")) email = argv[++i];
+    else throw new Error("Usage: login [--password | --browser] [--email EMAIL]. Password values are never accepted as arguments.");
+  }
+  if (browser && (usePassword || email)) throw new Error("--browser cannot be combined with password login options.");
+  usePassword = usePassword || Boolean(email) || (!browser && !browserLoginAvailable());
+  if (usePassword) {
+    writeOut(`password login for ${hostOf(config.baseUrl)}; only the session cookie will be saved.`);
+    try {
+      const cookie = await promptPasswordLogin(config.baseUrl, email);
+      const id = await validateCookie(cookie);
+      await saveStored(config.baseUrl, cookie);
+      clearIdentity();
+      writeOut(`logged in as ${id.userEmail || id.userId}; saved to ${cookieFilePath()}`);
+      return 0;
+    } catch {
+      writeOut("Password login failed or cancelled. Check credentials, HTTPS connectivity and CSRF support. CAPTCHA/SSO/2FA require browser login. Existing credentials were not changed.");
+      return 1;
+    }
+  }
   writeOut(`opening a Chrome window for ${hostOf(config.baseUrl)} (a profile dedicated to overleaf-mcp).`);
   writeOut("complete login normally — captcha, SSO, 2FA all work because it's a real browser.");
   let cookie: string;
@@ -89,7 +114,7 @@ export async function maybeRunCli(argv: string[]): Promise<boolean> {
   if (cmd !== "login" && cmd !== "logout" && cmd !== "status") return false;
   let code = 0;
   try {
-    if (cmd === "login") code = await runLogin();
+    if (cmd === "login") code = await runLogin(argv);
     else if (cmd === "logout") code = await runLogout(argv);
     else code = await runStatus();
   } catch (err) {

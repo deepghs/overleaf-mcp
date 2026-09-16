@@ -41,11 +41,14 @@
   ],
   "license": "AGPL-3.0-or-later",
   "engines": {
-    "node": ">=20"
+    "node": ">=20.18.1"
   },
   "dependencies": {
+    "@inquirer/prompts": "^8.7.2",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "cheerio": "^1.2.0",
     "diff-match-patch": "^1.0.5",
+    "tough-cookie": "^6.0.2",
     "uuid": "^11.0.0",
     "ws": "^8.20.1",
     "zod": "^4.4.3"

@@ -44,6 +44,8 @@ const INSTRUCTIONS = [
   "After stale-version rejection, re-read and recompute changes; never retry old new_content against a refreshed cache.",
   "",
   "Auth UX (important for the user-facing message):",
+  "On headless servers, ask the user to run login --password in an SSH terminal.",
+  "Do not request passwords in chat or pass them as CLI arguments. OL_HEADLESS=1 disables browser fallback.",
   "If no session cookie is stored yet, or the previous one has expired (Overleaf",
   "cookies last ~5 days), the next tool call will spawn an isolated Chrome window",
   "pointed at Overleaf so the user can log in. The window uses a dedicated profile",

@@ -6,6 +6,7 @@
 import { logger } from "../util/logger.js";
 import { loadStored, saveStored, clearStored } from "./cookieStore.js";
 import { captureCookie } from "./browserLogin.js";
+import { browserLoginAvailable } from "./passwordLogin.js";
 
 const pending = new Map<string, Promise<string>>();
 
@@ -18,6 +19,9 @@ async function runDiscovery(baseUrl: string): Promise<string> {
   if (stored?.cookie) {
     logger.debug(`auth: using stored cookie for ${hostKey(baseUrl)} (saved ${new Date(stored.savedAt).toISOString()})`);
     return stored.cookie;
+  }
+  if (!browserLoginAvailable()) {
+    throw new Error("No usable session in a headless environment. In an SSH terminal run OL_BASE_URL=<instance> node dist/index.js login --password, then retry. MCP will not prompt for passwords on stdio.");
   }
   logger.info(`auth: no stored cookie for ${hostKey(baseUrl)}, launching browser to capture one`);
   const captured = await captureCookie(baseUrl);
