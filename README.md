@@ -4,13 +4,17 @@ Collaborative LaTeX editing through MCP: native tracked changes, review comments
 compilation, downloads, and file management in one connection.
 
 Based on [netique/overleaf-mcp](https://github.com/netique/overleaf-mcp), with its
-Git history and AGPL license preserved. This version adds **nine tools**, for
-**26 tools total**. Document edits use Overleaf's Socket.IO OT protocol rather
+Git history and AGPL license preserved. This version adds **ten tools**, for
+**27 tools total**. Document edits use Overleaf's Socket.IO OT protocol rather
 than whole-file uploads or the Git bridge. This is an unofficial integration,
 not an Overleaf-supported API.
 
 ## What This Version Adds
 
+- Log in to several Overleaf servers at once (overleaf.com plus any number of
+  self-hosted instances) and pick one per `list_projects` / `open_project` call.
+- Keep the file tree in sync from the server's real-time broadcasts instead of
+  re-joining the project after every file-management call.
 - Download document snapshots, binary assets, project ZIPs, PDFs, and compile logs.
 - Create empty documents and folders, upload new assets, rename and delete files.
 - Create native comments on unique selected text, with version checks and
@@ -94,6 +98,33 @@ Never commit this store or its dedicated browser profile.
 Use a dedicated collaborator account for clear attribution and limited project
 access. Otherwise edits and comments use the authenticated human's identity.
 
+### Multiple Overleaf Servers
+
+Cookies are stored per host, so one MCP process can be logged in to overleaf.com
+and any number of self-hosted instances at the same time. Every host with a
+stored cookie is a *known server*, alongside `OL_BASE_URL` (the default) and
+anything pre-declared in `OL_SERVERS`:
+
+```bash
+# Log in to each server once; --server takes a host or an origin URL.
+node dist/index.js login --server overleaf.example.org
+node dist/index.js login --server www.overleaf.com
+node dist/index.js login --password --server lab.example.edu   # headless host
+node dist/index.js status                                       # every known server
+node dist/index.js logout --server overleaf.example.org
+```
+
+At run time, `list_servers` shows the known servers and which one the open
+project is on. `list_projects` without `server` queries every logged-in server
+and tags each project with its `server`; `open_project` accepts the same
+`server` argument and may omit it when the project was just listed or only one
+server is logged in. One project is open at a time, and every project-scoped
+tool acts on that project's server. Naming a server that has no stored cookie
+starts the login flow for it (a browser window on desktops; on headless hosts an
+error telling you which `login --server` command to run). A wrong server never
+logs you out: the real-time service answers with `connectionRejected`, which is
+reported as an API error, not treated as an expired cookie.
+
 ## MCP Configuration
 
 ### Codex
@@ -140,7 +171,7 @@ Project-scoped tools use the project selected by `open_project`.
 
 | Group | Tools | Purpose |
 | --- | --- | --- |
-| Discovery | `ping`, `list_projects`, `open_project`, `list_files` | Inspect projects and the cached tree |
+| Discovery | `ping`, `list_servers`, `list_projects`, `open_project`, `list_files` | Inspect servers, projects and the live tree |
 | Editing | `read_file`, `edit_file`, `find_and_replace` | Read text/version and submit minimal tracked OT edits |
 | Review | `list_tracked_changes`, `accept_changes`, `reject_changes` | Inspect and review pending suggestions |
 | Comments | `list_comments`, `read_comment_thread`, `add_comment`, `reply_comment`, `resolve_comment`, `reopen_comment` | Native review-panel threads |
@@ -152,6 +183,9 @@ Project-scoped tools use the project selected by `open_project`.
 
 | Tool | Required arguments | Constraints / optional arguments |
 | --- | --- | --- |
+| `list_servers` | — | No network; default, `OL_SERVERS` and every cookie host |
+| `list_projects` | — | Optional `server` (host or URL); omitted = every logged-in server |
+| `open_project` | `project_id` | Optional `server`; needed only when several servers are logged in and the project was not just listed |
 | `download_file` | `path`, `output_path` | Existing text or binary file |
 | `download_project` | `output_path` | ZIP only, no extraction |
 | `download_output` | `output_path` | Optional `artifact`, default `output.pdf`; compile first |
@@ -193,10 +227,16 @@ Example requests:
 
 - **No upload fallback for text.** Uploads refuse existing targets and text files.
   Create empty documents, then insert their content through tracked OT.
-- Tree mutations refresh the remote tree and invalidate document caches. Re-read
-  text afterward. File-management calls are serialized with each other within
-  one process, not with every upstream tool. Do not overlap them with project
-  switching or text edits.
+- The file tree follows the server's real-time broadcasts (`reciveNewDoc`,
+  `removeEntity`, `reciveEntityRename`, ...), so collaborators' changes and your
+  own file-management calls show up without re-joining the project, and cached
+  document text survives them (a deleted doc is dropped from the cache). Each
+  file-management call waits for its own broadcast and reports
+  `tree_sync: "event"`; if none arrives within 5 s it re-joins the project once
+  and reports `tree_sync: "reconnect"`, which also clears the document cache.
+  File-management calls are serialized with each other within one process, not
+  with every upstream tool. Do not overlap them with project switching or text
+  edits.
 - Remote filename checks are not atomic with server writes. Do not create the
   same filename simultaneously from different clients; cross-client races are
   not covered by the collision guard.
@@ -216,7 +256,9 @@ Example requests:
 
 | Variable | Purpose |
 | --- | --- |
-| `OL_BASE_URL` | Origin; defaults to `https://www.overleaf.com` |
+| `OL_BASE_URL` | Default server origin; `https://www.overleaf.com` if unset |
+| `OL_SERVERS` | Extra servers to pre-declare (comma/space separated hosts or origins); hosts with a stored cookie are known without this |
+| `OL_HEADLESS` | `1` disables browser login; a missing cookie then fails with SSH instructions |
 | `OL_BROWSER` | Explicit Chromium-family browser executable |
 | `OL_CSRF` | Optional CSRF override |
 | `OL_MCP_LOG_LEVEL` | `debug`, `info`, `warn`, `error`; logs go to stderr |
@@ -237,6 +279,16 @@ anchored comment readback, stale-version rejection, binary byte roundtrips,
 file-management protections, PDF/log/ZIP downloads, and two-client OT merging
 at different positions. This was not browser visual QA or exhaustive testing of
 every upstream tool or every Overleaf version.
+
+On September 22, 2026, the multi-server and tree-sync changes passed **48 unit
+tests** plus a live two-client run against a self-hosted deployment: eight
+file-management calls (create, rename, edit, delete across two clients) all
+confirmed through broadcasts with `tree_sync: "event"`, the second client saw
+the first client's changes without re-opening, and the run used exactly one
+socket connection per client. Multi-server logic was exercised with one
+logged-in server and one without a cookie (aggregate listing, automatic server
+pick, fast failure on the cookie-less server without disturbing the open
+project). Two servers logged in simultaneously was covered by unit tests only.
 
 The opt-in integration test **modifies its supplied disposable project** and
 leaves review evidence there. It imports an existing olcli credential into an

@@ -21,7 +21,7 @@ async function runDiscovery(baseUrl: string): Promise<string> {
     return stored.cookie;
   }
   if (!browserLoginAvailable()) {
-    throw new Error("No usable session in a headless environment. In an SSH terminal run OL_BASE_URL=<instance> node dist/index.js login --password, then retry. MCP will not prompt for passwords on stdio.");
+    throw new Error(`No stored login for ${hostKey(baseUrl)} and no browser available in this headless environment. In an SSH terminal run \`node dist/index.js login --password --server ${hostKey(baseUrl)}\`, then retry. MCP will not prompt for passwords on stdio.`);
   }
   logger.info(`auth: no stored cookie for ${hostKey(baseUrl)}, launching browser to capture one`);
   const captured = await captureCookie(baseUrl);

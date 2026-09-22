@@ -15,6 +15,7 @@ import { registerComments } from "./tools/comments.js";
 import { registerTrackedChanges } from "./tools/trackedChanges.js";
 import { registerFileManagement } from "./tools/fileManagement.js";
 import { registerAddComment } from "./tools/addComment.js";
+import { registerListServers } from "./tools/listServers.js";
 import { close as closeActiveProject } from "./session/activeProject.js";
 import { maybeRunCli } from "./auth/cli.js";
 import { logger } from "./util/logger.js";
@@ -31,9 +32,15 @@ const INSTRUCTIONS = [
   "Overleaf MCP server. Operates on .tex files via Overleaf's Socket.IO web API",
   "(not the Git bridge), so edits land in real time and respect tracked-changes mode.",
   "",
+  "Several Overleaf servers (overleaf.com and self-hosted instances) can be logged in at once.",
+  "list_servers shows them. list_projects without `server` queries every logged-in server and tags",
+  "each project with its `server`. open_project(project_id, server?) picks one; `server` is a host",
+  "like 'overleaf.example.org' and may be omitted when the project was just listed or only one",
+  "server is logged in. One project is open at a time; project-scoped tools act on its server.",
+  "",
   "Typical flow:",
-  "  1. list_projects -> pick an id",
-  "  2. open_project(id) -> joins the Socket.IO room, returns file tree + tc state",
+  "  1. list_projects -> pick an id (note its server)",
+  "  2. open_project(id[, server]) -> joins the Socket.IO room, returns file tree + tc state",
   "  3. read_file / edit_file by path (e.g. 'chapters/intro.tex')",
   "  4. compile to verify edits build",
   "  5. download_output to save PDF/log, download_project for ZIP, download_file for snapshots",
@@ -44,7 +51,7 @@ const INSTRUCTIONS = [
   "After stale-version rejection, re-read and recompute changes; never retry old new_content against a refreshed cache.",
   "",
   "Auth UX (important for the user-facing message):",
-  "On headless servers, ask the user to run login --password in an SSH terminal.",
+  "On headless servers, ask the user to run `login --password --server <host>` in an SSH terminal.",
   "Do not request passwords in chat or pass them as CLI arguments. OL_HEADLESS=1 disables browser fallback.",
   "If no session cookie is stored yet, or the previous one has expired (Overleaf",
   "cookies last ~5 days), the next tool call will spawn an isolated Chrome window",
@@ -76,6 +83,7 @@ async function main(): Promise<void> {
     }),
   );
 
+  registerListServers(server);
   registerListProjects(server);
   registerOpenProject(server);
   registerListFiles(server);

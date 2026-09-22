@@ -62,16 +62,16 @@ export interface FlatEntity {
 
 export function flattenTree(root: FolderEntity, prefix = ""): FlatEntity[] {
   const out: FlatEntity[] = [];
-  for (const folder of root.folders) {
+  for (const folder of root.folders ?? []) {
     const path = prefix ? `${prefix}/${folder.name}` : folder.name;
     out.push({ kind: "folder", id: folder._id, path, name: folder.name, parentFolderId: root._id });
     out.push(...flattenTree(folder, path));
   }
-  for (const doc of root.docs) {
+  for (const doc of root.docs ?? []) {
     const path = prefix ? `${prefix}/${doc.name}` : doc.name;
     out.push({ kind: "doc", id: doc._id, path, name: doc.name, parentFolderId: root._id });
   }
-  for (const file of root.fileRefs) {
+  for (const file of root.fileRefs ?? []) {
     const path = prefix ? `${prefix}/${file.name}` : file.name;
     out.push({ kind: "file", id: file._id, path, name: file.name, parentFolderId: root._id });
   }
@@ -90,4 +90,128 @@ export function isTrackChangesOnForUser(project: ProjectEntity, userId: string):
     if (m["__everyone__"] === true) return true;
   }
   return false;
+}
+
+// ---------------------------------------------------------------------------
+// Incremental tree maintenance.
+//
+// The web service broadcasts every file-tree mutation to the project room
+// (services/web/app/src/Features/Editor/EditorController.mjs), including to
+// the client that caused it:
+//   reciveNewDoc        (folderId, doc, source, userId)
+//   reciveNewFile       (folderId, fileRef, source, linkedFileData, userId)
+//   reciveNewFolder     (folderId, folder, userId)
+//   removeEntity        (entityId, source)
+//   reciveEntityRename  (entityId, newName)
+//   reciveEntityMove    (entityId, folderId)
+// Applying these keeps ActiveProject.entities current without re-joining the
+// project (modern real-time has no explicit joinProject; refreshing the tree
+// otherwise means tearing down and re-opening the socket).
+// ---------------------------------------------------------------------------
+
+export const TREE_EVENTS = [
+  "reciveNewDoc",
+  "reciveNewFile",
+  "reciveNewFolder",
+  "removeEntity",
+  "reciveEntityRename",
+  "reciveEntityMove",
+] as const;
+
+type Located = { parent: FolderEntity; kind: EntityKind; index: number };
+
+function listFor(folder: FolderEntity, kind: EntityKind): Array<DocEntity | FileRefEntity | FolderEntity> {
+  if (kind === "folder") return (folder.folders ??= []);
+  if (kind === "doc") return (folder.docs ??= []);
+  return (folder.fileRefs ??= []);
+}
+
+function locate(root: FolderEntity, id: string): Located | undefined {
+  for (const kind of ["folder", "doc", "file"] as const) {
+    const index = listFor(root, kind).findIndex((e) => e._id === id);
+    if (index >= 0) return { parent: root, kind, index };
+  }
+  for (const folder of root.folders ?? []) {
+    const hit = locate(folder, id);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+export function findFolderById(root: FolderEntity, id: string): FolderEntity | undefined {
+  if (root._id === id) return root;
+  for (const folder of root.folders ?? []) {
+    const hit = findFolderById(folder, id);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+function isEntity(v: unknown): v is { _id: string; name: string } {
+  return typeof v === "object" && v !== null
+    && typeof (v as { _id?: unknown })._id === "string"
+    && typeof (v as { name?: unknown }).name === "string";
+}
+
+// Insert under `parentId`. Idempotent: an entity already present anywhere in
+// the tree is left alone (returns false — nothing changed).
+export function addToTree(root: FolderEntity, parentId: string, kind: EntityKind, entity: { _id: string; name: string }): boolean {
+  const parent = findFolderById(root, parentId);
+  if (!parent || locate(root, entity._id)) return false;
+  const value = kind === "folder"
+    ? {
+        ...(entity as Partial<FolderEntity>),
+        _id: entity._id,
+        name: entity.name,
+        docs: (entity as Partial<FolderEntity>).docs ?? [],
+        fileRefs: (entity as Partial<FolderEntity>).fileRefs ?? [],
+        folders: (entity as Partial<FolderEntity>).folders ?? [],
+      }
+    : entity;
+  listFor(parent, kind).push(value as DocEntity | FileRefEntity | FolderEntity);
+  return true;
+}
+
+export function removeEntityFromTree(root: FolderEntity, id: string): boolean {
+  const hit = locate(root, id);
+  if (!hit) return false;
+  listFor(hit.parent, hit.kind).splice(hit.index, 1);
+  return true;
+}
+
+export function renameEntityInTree(root: FolderEntity, id: string, newName: string): boolean {
+  const hit = locate(root, id);
+  if (!hit) return false;
+  listFor(hit.parent, hit.kind)[hit.index].name = newName;
+  return true;
+}
+
+export function moveEntityInTree(root: FolderEntity, id: string, newParentId: string): boolean {
+  const hit = locate(root, id);
+  const target = findFolderById(root, newParentId);
+  if (!hit || !target) return false;
+  const [entity] = listFor(hit.parent, hit.kind).splice(hit.index, 1);
+  listFor(target, hit.kind).push(entity);
+  return true;
+}
+
+// Apply one server broadcast to the tree. Returns true when the tree changed.
+// Unknown events and malformed payloads are ignored (false).
+export function applyTreeEvent(root: FolderEntity, name: string, args: unknown[]): boolean {
+  switch (name) {
+    case "reciveNewDoc":
+      return typeof args[0] === "string" && isEntity(args[1]) && addToTree(root, args[0], "doc", args[1]);
+    case "reciveNewFile":
+      return typeof args[0] === "string" && isEntity(args[1]) && addToTree(root, args[0], "file", args[1]);
+    case "reciveNewFolder":
+      return typeof args[0] === "string" && isEntity(args[1]) && addToTree(root, args[0], "folder", args[1]);
+    case "removeEntity":
+      return typeof args[0] === "string" && removeEntityFromTree(root, args[0]);
+    case "reciveEntityRename":
+      return typeof args[0] === "string" && typeof args[1] === "string" && renameEntityInTree(root, args[0], args[1]);
+    case "reciveEntityMove":
+      return typeof args[0] === "string" && typeof args[1] === "string" && moveEntityInTree(root, args[0], args[1]);
+    default:
+      return false;
+  }
 }

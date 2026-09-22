@@ -2,7 +2,8 @@
 //
 // Stores a single JSON map at <configDir>/overleaf-mcp/cookie.json with mode
 // 0600. Multi-host so the same machine can hold credentials for overleaf.com
-// and a self-hosted CE side-by-side. No encryption — see README.
+// and any number of self-hosted instances side-by-side; every host in here is
+// a "known server" for list_servers / list_projects. No encryption — see README.
 
 import { promises as fs } from "node:fs";
 import os from "node:os";
@@ -12,6 +13,15 @@ import { logger } from "../util/logger.js";
 
 export interface StoredCookie {
   cookie: string;
+  savedAt: number;
+  // Origin the cookie was captured for. Entries written before 0.4 lack it;
+  // those are assumed to be https://<host>.
+  baseUrl?: string;
+}
+
+export interface StoredServer {
+  host: string;
+  baseUrl: string;
   savedAt: number;
 }
 
@@ -64,9 +74,19 @@ export async function loadStored(baseUrl: string): Promise<StoredCookie | null> 
   return store.hosts[hostKey(baseUrl)] ?? null;
 }
 
+// Every host with a stored cookie, with the origin it was captured for.
+export async function listStored(): Promise<StoredServer[]> {
+  const store = await readStore();
+  return Object.entries(store.hosts).map(([host, entry]) => ({
+    host,
+    baseUrl: entry.baseUrl ?? `https://${host}`,
+    savedAt: entry.savedAt,
+  }));
+}
+
 export async function saveStored(baseUrl: string, cookie: string): Promise<void> {
   const store = await readStore();
-  store.hosts[hostKey(baseUrl)] = { cookie, savedAt: Date.now() };
+  store.hosts[hostKey(baseUrl)] = { cookie, savedAt: Date.now(), baseUrl: new URL(baseUrl).origin };
   await writeStore(store);
 }
 

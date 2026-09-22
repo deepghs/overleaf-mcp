@@ -21,6 +21,12 @@ export function updateDoc(docId: string, newText: string, newVersion: number): v
   docs.set(docId, { docId, text: newText, version: newVersion });
 }
 
+// Forget one doc — used when the server broadcasts its deletion. Renames and
+// moves keep the same doc id, so they leave the cache alone.
+export function dropDoc(docId: string): void {
+  docs.delete(docId);
+}
+
 export function clearDocCache(): void {
   docs.clear();
 }

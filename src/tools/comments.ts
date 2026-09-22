@@ -20,10 +20,10 @@ interface EnrichedThread {
   full_thread?: CommentThread;
 }
 
-async function fetchThreadsEnriched(projectId: string, docPaths: Map<string, string>): Promise<EnrichedThread[]> {
+async function fetchThreadsEnriched(baseUrl: string, projectId: string, docPaths: Map<string, string>): Promise<EnrichedThread[]> {
   const [threadsRes, rangesRes] = await Promise.all([
-    olGet(`project/${projectId}/threads`),
-    olGet(`project/${projectId}/ranges`),
+    olGet(baseUrl, `project/${projectId}/threads`),
+    olGet(baseUrl, `project/${projectId}/ranges`),
   ]);
   const threads = await asJson<ThreadsByIdResponse>(threadsRes, "GET /threads");
   const ranges = await asJson<RangesResponse>(rangesRes, "GET /ranges");
@@ -97,7 +97,7 @@ export function registerComments(server: McpServer): void {
       const ap = getActiveProject();
       if (!ap) return { content: [{ type: "text", text: "No project is open. Call open_project first." }], isError: true };
       try {
-        let threads = await fetchThreadsEnriched(ap.projectId, docPathById(ap));
+        let threads = await fetchThreadsEnriched(ap.baseUrl, ap.projectId, docPathById(ap));
         if (!args.include_resolved) threads = threads.filter((t) => !t.resolved);
         if (args.path_contains) {
           const needle = args.path_contains.toLowerCase();
@@ -133,7 +133,7 @@ export function registerComments(server: McpServer): void {
       const ap = getActiveProject();
       if (!ap) return { content: [{ type: "text", text: "No project is open." }], isError: true };
       try {
-        const r = await olGet(`project/${ap.projectId}/threads`);
+        const r = await olGet(ap.baseUrl, `project/${ap.projectId}/threads`);
         const all = await asJson<ThreadsByIdResponse>(r, "GET /threads");
         const t = all[args.thread_id];
         if (!t) {
@@ -163,7 +163,7 @@ export function registerComments(server: McpServer): void {
       const ap = getActiveProject();
       if (!ap) return { content: [{ type: "text", text: "No project is open." }], isError: true };
       try {
-        const res = await olPostJson(`project/${ap.projectId}/thread/${args.thread_id}/messages`, { content: args.content });
+        const res = await olPostJson(ap.baseUrl, `project/${ap.projectId}/thread/${args.thread_id}/messages`, { content: args.content });
         await expectOk(res, `POST /thread/${args.thread_id}/messages`);
         return {
           content: [{ type: "text", text: `Posted reply (${args.content.length} chars) to thread ${args.thread_id}.` }],
@@ -187,7 +187,7 @@ export function registerComments(server: McpServer): void {
       const ap = getActiveProject();
       if (!ap) return { content: [{ type: "text", text: "No project is open." }], isError: true };
       try {
-        const res = await olPostJson(`project/${ap.projectId}/thread/${args.thread_id}/resolve`, {});
+        const res = await olPostJson(ap.baseUrl, `project/${ap.projectId}/thread/${args.thread_id}/resolve`, {});
         await expectOk(res, `POST /thread/${args.thread_id}/resolve`);
         return {
           content: [{ type: "text", text: `Resolved thread ${args.thread_id}.` }],
@@ -211,7 +211,7 @@ export function registerComments(server: McpServer): void {
       const ap = getActiveProject();
       if (!ap) return { content: [{ type: "text", text: "No project is open." }], isError: true };
       try {
-        const res = await olPostJson(`project/${ap.projectId}/thread/${args.thread_id}/reopen`, {});
+        const res = await olPostJson(ap.baseUrl, `project/${ap.projectId}/thread/${args.thread_id}/reopen`, {});
         await expectOk(res, `POST /thread/${args.thread_id}/reopen`);
         return {
           content: [{ type: "text", text: `Reopened thread ${args.thread_id}.` }],

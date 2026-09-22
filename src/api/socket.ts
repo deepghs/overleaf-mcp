@@ -163,10 +163,30 @@ class OverleafSocket {
           resolve();
         };
         this.once("joinProjectResponse", once);
+        // The server refuses the auto-join by emitting connectionRejected and
+        // then disconnecting (real-time Router.js). Surface that at once
+        // instead of letting the 3s fallback below fail on a closed socket.
+        // Only 'invalid session' is auth-shaped; a bad or foreign project id
+        // must NOT evict a valid cookie, so everything else is an API error.
+        this.once("connectionRejected", (args) => {
+          clearTimeout(settleTimer);
+          const payload = args[0] as { message?: string } | string | undefined;
+          const message = typeof payload === "string" ? payload : payload?.message ?? "connection rejected";
+          this.closed = true;
+          reject(
+            /invalid session/i.test(message)
+              ? new OverleafAuthError(`server rejected connection: ${message}`)
+              : new OverleafApiError(
+                  0,
+                  message,
+                  `server refused to join project ${this.projectId} on ${new URL(this.identity.baseUrl).host} — wrong server, no access, or bad project id`,
+                ),
+          );
+        });
         // Some servers (older / v1 path) won't emit joinProjectResponse on the
         // initial WS connect; fall back to emitting joinProject explicitly.
         setTimeout(() => {
-          if (!this.joinedProject) {
+          if (!this.joinedProject && !this.closed) {
             logger.info("no joinProjectResponse received, falling back to explicit joinProject emit");
             this.emit<[ProjectEntity, string, number] | ProjectEntity>("joinProject", [{ project_id: this.projectId }])
               .then((ret) => {
@@ -243,6 +263,12 @@ class OverleafSocket {
         const args = obj.args ?? [];
         const ls = this.listeners.get(name);
         if (ls) for (const l of ls) try { l(args); } catch (e) { logger.error(`listener for ${name} threw`, e); }
+        // Project-level broadcasts (file-tree changes, root doc, name) go to
+        // the session layer, but only from the socket that is currently
+        // active — a superseded socket may still flush a late frame.
+        if (projectEventSink && this === active) {
+          try { projectEventSink(name, args); } catch (e) { logger.error(`project event sink threw on ${name}`, e); }
+        }
         // Track-changes / reciveNewDoc / etc may also acknowledge with msg id;
         // we ignore that for now since Overleaf doesn't appear to expect a
         // response from us for server-emitted events.
@@ -352,21 +378,37 @@ class OverleafSocket {
 
 let active: OverleafSocket | null = null;
 
-export async function ensureSocketForProject(projectId: string): Promise<{
+// Single-slot hooks for the session layer (activeProject.ts). Module-level
+// rather than per-socket so they survive the transparent reconnects done by
+// withReconnectingSocket.
+type ProjectEventSink = (name: string, args: unknown[]) => void;
+type ReconnectHook = (project: ProjectEntity | null) => void;
+let projectEventSink: ProjectEventSink | null = null;
+let reconnectHook: ReconnectHook | null = null;
+
+export function onProjectEvent(sink: ProjectEventSink | null): void {
+  projectEventSink = sink;
+}
+
+export function onReconnected(hook: ReconnectHook | null): void {
+  reconnectHook = hook;
+}
+
+export async function ensureSocketForProject(baseUrl: string, projectId: string): Promise<{
   socket: OverleafSocket;
   publicId?: string;
   joinedProject?: ProjectEntity;
 }> {
-  return withAuthRetry(async () => {
-    if (active && active.projectId === projectId && active.isOpen()) {
+  return withAuthRetry(baseUrl, async () => {
+    if (active && active.projectId === projectId && active.identity.baseUrl === baseUrl && active.isOpen()) {
       return { socket: active, publicId: active.publicId ?? undefined, joinedProject: active.joinedProject ?? undefined };
     }
     if (active) {
-      logger.info(`switching project: ${active.projectId} -> ${projectId}`);
+      logger.info(`switching project: ${new URL(active.identity.baseUrl).host}/${active.projectId} -> ${new URL(baseUrl).host}/${projectId}`);
       active.disconnect();
       active = null;
     }
-    const identity = await getIdentity();
+    const identity = await getIdentity(baseUrl);
     const s = new OverleafSocket(projectId, identity);
     await s.connect();
     active = s;
@@ -388,10 +430,11 @@ async function withReconnectingSocket<T>(
   prep?: () => Promise<void>,
 ): Promise<T> {
   const projectId = active?.projectId;
+  const baseUrl = active?.identity.baseUrl;
   try {
     return await op();
   } catch (err) {
-    if (!projectId) throw err;
+    if (!projectId || !baseUrl) throw err;
     const isAuth = err instanceof OverleafAuthError;
     const isClosed = err instanceof Error && /socket closed|socket not open/i.test(err.message);
     if (!isAuth && !isClosed) throw err;
@@ -407,12 +450,16 @@ async function withReconnectingSocket<T>(
     clearDocCache();
     if (isAuth) {
       const { evictAndRediscover } = await import("../auth/discover.js");
-      const { loadConfig } = await import("../config.js");
       const { clearIdentity } = await import("../session/identity.js");
-      clearIdentity();
-      await evictAndRediscover(loadConfig().baseUrl);
+      clearIdentity(baseUrl);
+      await evictAndRediscover(baseUrl);
     }
-    await ensureSocketForProject(projectId);
+    const fresh = await ensureSocketForProject(baseUrl, projectId);
+    // Tree broadcasts sent while we were down were missed; hand the fresh
+    // joinProject snapshot to the session layer so it can re-index.
+    if (reconnectHook) {
+      try { reconnectHook(fresh.joinedProject ?? null); } catch (e) { logger.error("reconnect hook threw", e); }
+    }
     if (prep) await prep();
     return await op();
   }
@@ -460,4 +507,10 @@ export function disconnectActive(): void {
     active.disconnect();
     active = null;
   }
+}
+
+// Tear down the active socket only if it belongs to `baseUrl`. Auth recovery
+// for one server must not disturb an open project on another.
+export function disconnectActiveIf(baseUrl: string): void {
+  if (active && active.identity.baseUrl === baseUrl) disconnectActive();
 }

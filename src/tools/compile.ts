@@ -47,11 +47,11 @@ export function buildOutputUrl(file: OutputFile, last: CompileResponse): string 
   return qs ? `${base}${sep}${qs}` : base;
 }
 
-async function fetchOutputLog(last: CompileResponse): Promise<string | undefined> {
+async function fetchOutputLog(baseUrl: string, last: CompileResponse): Promise<string | undefined> {
   const logFile = last.outputFiles?.find((f) => f.path === "output.log");
   if (!logFile) return undefined;
   const path = buildOutputUrl(logFile, last);
-  const res = await olGet(path);
+  const res = await olGet(baseUrl, path);
   await expectOk(res, `GET ${path}`);
   return await res.text();
 }
@@ -82,7 +82,7 @@ export function registerCompile(server: McpServer): void {
           ...(args.root_doc ?? ap.rootDocPath ? { rootResourcePath: args.root_doc ?? ap.rootDocPath } : {}),
           stopOnFirstError: args.stop_on_first_error,
         };
-        const res = await olPostJson(`project/${ap.projectId}/compile?auto_compile=true`, body);
+        const res = await olPostJson(ap.baseUrl, `project/${ap.projectId}/compile?auto_compile=true`, body);
         const result = await asJson<CompileResponse>(res, `POST project/${ap.projectId}/compile`);
         setLastCompile(result);
         const pdf = result.outputFiles?.find((f) => f.path === "output.pdf");
@@ -93,7 +93,7 @@ export function registerCompile(server: McpServer): void {
         let logBytes = 0;
         if (logFile) {
           try {
-            const log = await fetchOutputLog(result);
+            const log = await fetchOutputLog(ap.baseUrl, result);
             if (log) {
               logBytes = log.length;
               const summarized = summarizeErrors(log);
@@ -171,7 +171,7 @@ export function registerReadLog(server: McpServer): void {
         return { content: [{ type: "text", text: "The last compile produced no output.log (it may have failed before reaching LaTeX)." }], isError: true };
       }
       try {
-        const fullLog = await fetchOutputLog(last);
+        const fullLog = await fetchOutputLog(ap.baseUrl, last);
         if (fullLog == null) {
           return { content: [{ type: "text", text: "No output.log available." }], isError: true };
         }

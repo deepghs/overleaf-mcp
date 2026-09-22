@@ -11,20 +11,22 @@ export interface Identity {
   userEmail: string;
 }
 
-let cached: Identity | null = null;
-let pending: Promise<Identity> | null = null;
+// One identity per server, so several Overleaf instances can be logged in
+// at once. Keyed by base URL (origin).
+const cached = new Map<string, Identity>();
+const pending = new Map<string, Promise<Identity>>();
 
 function extractMeta(html: string, name: string): string | undefined {
   const re = new RegExp(`<meta\\s+name=["']${name}["']\\s+content=["']([^"']*)["']`);
   return html.match(re)?.[1];
 }
 
-export async function validateCookie(cookie: string, config: Config = loadConfig()): Promise<Identity> {
-  return resolveIdentity(cookie, config);
+export async function validateCookie(cookie: string, baseUrl: string, config: Config = loadConfig()): Promise<Identity> {
+  return resolveIdentity(cookie, baseUrl, config);
 }
 
-async function resolveIdentity(cookie: string, config: Config): Promise<Identity> {
-  const url = `${config.baseUrl}/project`;
+async function resolveIdentity(cookie: string, baseUrl: string, config: Config): Promise<Identity> {
+  const url = `${baseUrl}/project`;
   const res = await fetch(url, {
     method: "GET",
     redirect: "manual",
@@ -33,12 +35,12 @@ async function resolveIdentity(cookie: string, config: Config): Promise<Identity
   if (res.status === 301 || res.status === 302) {
     const location = res.headers.get("location") ?? "";
     throw new OverleafAuthError(
-      `Session cookie rejected (redirected to ${location || "login"}). ` +
-        "The cookie is likely expired — run `overleaf-mcp login` to refresh.",
+      `Session cookie for ${new URL(baseUrl).host} rejected (redirected to ${location || "login"}). ` +
+        "The cookie is likely expired — run `overleaf-mcp login --server <host>` to refresh.",
     );
   }
   if (!res.ok) {
-    throw new OverleafAuthError(`GET /project returned HTTP ${res.status}`);
+    throw new OverleafAuthError(`GET ${url} returned HTTP ${res.status}`);
   }
   const html = await res.text();
   const userId = extractMeta(html, "ol-user_id");
@@ -46,7 +48,7 @@ async function resolveIdentity(cookie: string, config: Config): Promise<Identity
   const csrf = config.csrfOverride ?? extractMeta(html, "ol-csrfToken");
   if (!userId) {
     throw new OverleafAuthError(
-      "Could not find ol-user_id meta tag on /project page. " +
+      `Could not find ol-user_id meta tag on ${url}. ` +
         "The cookie may be invalid or this is an unsupported Overleaf version.",
     );
   }
@@ -56,28 +58,33 @@ async function resolveIdentity(cookie: string, config: Config): Promise<Identity
         "Pass OL_CSRF as a fallback or check that your Overleaf server emits the meta tag.",
     );
   }
-  logger.info(`authenticated as ${userEmail || userId}`);
-  return { baseUrl: config.baseUrl, cookie, csrf, userId, userEmail };
+  logger.info(`authenticated on ${new URL(baseUrl).host} as ${userEmail || userId}`);
+  return { baseUrl, cookie, csrf, userId, userEmail };
 }
 
-export async function getIdentity(): Promise<Identity> {
-  if (cached) return cached;
-  if (pending) return pending;
+export async function getIdentity(baseUrl: string): Promise<Identity> {
+  const hit = cached.get(baseUrl);
+  if (hit) return hit;
+  const inflight = pending.get(baseUrl);
+  if (inflight) return inflight;
   const config = loadConfig();
-  pending = (async () => {
-    const cookie = await discoverCookie(config.baseUrl);
-    return resolveIdentity(cookie, config);
+  const p = (async () => {
+    const cookie = await discoverCookie(baseUrl);
+    return resolveIdentity(cookie, baseUrl, config);
   })()
     .then((id) => {
-      cached = id;
+      cached.set(baseUrl, id);
       return id;
     })
     .finally(() => {
-      pending = null;
+      pending.delete(baseUrl);
     });
-  return pending;
+  pending.set(baseUrl, p);
+  return p;
 }
 
-export function clearIdentity(): void {
-  cached = null;
+// Drop one server's cached identity, or all of them.
+export function clearIdentity(baseUrl?: string): void {
+  if (baseUrl === undefined) cached.clear();
+  else cached.delete(baseUrl);
 }

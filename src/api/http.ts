@@ -1,3 +1,7 @@
+// Authenticated HTTP primitives. Every call names the server it targets so
+// several Overleaf instances can be used from one process; project-scoped
+// tools pass `ap.baseUrl` from the open project.
+
 import { getIdentity } from "../session/identity.js";
 import { withAuthRetry } from "../session/recovery.js";
 import { OverleafApiError, OverleafAuthError } from "./errors.js";
@@ -18,9 +22,9 @@ function throwIfAuthBad(res: Response): void {
   }
 }
 
-export async function olGet(path: string, extraHeaders: Record<string, string> = {}): Promise<Response> {
-  return withAuthRetry(async () => {
-    const id = await getIdentity();
+export async function olGet(baseUrl: string, path: string, extraHeaders: Record<string, string> = {}): Promise<Response> {
+  return withAuthRetry(baseUrl, async () => {
+    const id = await getIdentity(baseUrl);
     const res = await fetch(joinUrl(id.baseUrl, path), {
       method: "GET",
       redirect: "manual",
@@ -32,12 +36,13 @@ export async function olGet(path: string, extraHeaders: Record<string, string> =
 }
 
 export async function olPostJson(
+  baseUrl: string,
   path: string,
   body: Record<string, unknown> = {},
   extraHeaders: Record<string, string> = {},
 ): Promise<Response> {
-  return withAuthRetry(async () => {
-    const id = await getIdentity();
+  return withAuthRetry(baseUrl, async () => {
+    const id = await getIdentity(baseUrl);
     const res = await fetch(joinUrl(id.baseUrl, path), {
       method: "POST",
       redirect: "manual",
@@ -55,9 +60,9 @@ export async function olPostJson(
   });
 }
 
-export async function olDelete(path: string, extraHeaders: Record<string, string> = {}): Promise<Response> {
-  return withAuthRetry(async () => {
-    const id = await getIdentity();
+export async function olDelete(baseUrl: string, path: string, extraHeaders: Record<string, string> = {}): Promise<Response> {
+  return withAuthRetry(baseUrl, async () => {
+    const id = await getIdentity(baseUrl);
     const res = await fetch(joinUrl(id.baseUrl, path), {
       method: "DELETE",
       redirect: "manual",

@@ -25,12 +25,12 @@ export function registerAddComment(server: McpServer): void {
       if (doc.version !== args.expected_version) throw new Error("Stale version; read_file and locate the anchor again.");
       const p = uniqueAnchor(doc.docLines.join("\n"), args.selected_text);
       threadId = randomBytes(12).toString("hex");
-      await expectOk(await olPostJson(`project/${ap.projectId}/thread/${threadId}/messages`, { content: args.content }));
+      await expectOk(await olPostJson(ap.baseUrl, `project/${ap.projectId}/thread/${threadId}/messages`, { content: args.content }));
       await applyOtUpdate(entity.id, { doc: entity.id, v: doc.version, op: [{ p, c: args.selected_text, t: threadId }] });
       const updated = await joinDoc(entity.id);
       const ranges = updated.ranges as { comments?: Array<{ op?: { t?: string; p?: number; c?: string } }> };
       const anchor = ranges?.comments?.find(c => c.op?.t === threadId)?.op;
-      const threads = await asJson<Record<string, unknown>>(await olGet(`project/${ap.projectId}/threads`));
+      const threads = await asJson<Record<string, unknown>>(await olGet(ap.baseUrl, `project/${ap.projectId}/threads`));
       if (!anchor || !threads[threadId]) throw new Error("Comment creation could not be verified; inspect the thread before retrying.");
       return { content: [{ type: "text", text: JSON.stringify({ thread_id: threadId, position: anchor.p, selected_text: anchor.c, verified: true }) }] };
     } catch (e) {

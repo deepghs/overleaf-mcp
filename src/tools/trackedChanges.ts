@@ -34,8 +34,8 @@ function memberMap(ap: NonNullable<ReturnType<typeof getActiveProject>>): Map<st
   return m;
 }
 
-async function fetchAllRanges(projectId: string): Promise<RangesResponse> {
-  const res = await olGet(`project/${projectId}/ranges`);
+async function fetchAllRanges(baseUrl: string, projectId: string): Promise<RangesResponse> {
+  const res = await olGet(baseUrl, `project/${projectId}/ranges`);
   return await asJson<RangesResponse>(res, "GET /ranges");
 }
 
@@ -87,8 +87,8 @@ const AcceptSchema = z.object({
   change_ids: z.array(z.string().min(8)).min(1).describe("Tracked-change ids to accept (from list_tracked_changes)."),
 });
 
-async function postAccept(projectId: string, docId: string, changeIds: string[]): Promise<void> {
-  const res = await olPostJson(`project/${projectId}/doc/${docId}/changes/accept`, { change_ids: changeIds });
+async function postAccept(baseUrl: string, projectId: string, docId: string, changeIds: string[]): Promise<void> {
+  const res = await olPostJson(baseUrl, `project/${projectId}/doc/${docId}/changes/accept`, { change_ids: changeIds });
   await expectOk(res, `POST project/${projectId}/doc/${docId}/changes/accept`);
 }
 
@@ -136,7 +136,7 @@ export function registerTrackedChanges(server: McpServer): void {
       const ap = getActiveProject();
       if (!ap) return { content: [{ type: "text", text: "No project is open." }], isError: true };
       try {
-        const ranges = await fetchAllRanges(ap.projectId);
+        const ranges = await fetchAllRanges(ap.baseUrl, ap.projectId);
         const pathMap = docPathById(ap);
         const members = memberMap(ap);
         let all = flattenChanges(ranges, pathMap, members);
@@ -190,7 +190,7 @@ export function registerTrackedChanges(server: McpServer): void {
       if (!ap) return { content: [{ type: "text", text: "No project is open." }], isError: true };
       try {
         // Resolve which doc each change belongs to (via ranges).
-        const ranges = await fetchAllRanges(ap.projectId);
+        const ranges = await fetchAllRanges(ap.baseUrl, ap.projectId);
         const docByChange = new Map<string, string>();
         for (const docRange of ranges) {
           for (const c of docRange.ranges?.changes ?? []) docByChange.set(c.id, docRange.id);
@@ -213,7 +213,7 @@ export function registerTrackedChanges(server: McpServer): void {
         const docResults: Array<{ doc_id: string; doc_path?: string; count: number }> = [];
         const pathMap = docPathById(ap);
         for (const [docId, ids] of grouped) {
-          await postAccept(ap.projectId, docId, ids);
+          await postAccept(ap.baseUrl, ap.projectId, docId, ids);
           accepted += ids.length;
           docResults.push({ doc_id: docId, doc_path: pathMap.get(docId), count: ids.length });
         }
@@ -243,7 +243,7 @@ export function registerTrackedChanges(server: McpServer): void {
       if (!ap) return { content: [{ type: "text", text: "No project is open." }], isError: true };
       try {
         // Find the full change records (need position and text to invert).
-        const ranges = await fetchAllRanges(ap.projectId);
+        const ranges = await fetchAllRanges(ap.baseUrl, ap.projectId);
         const pathMap = docPathById(ap);
         const members = memberMap(ap);
         const flat = flattenChanges(ranges, pathMap, members);

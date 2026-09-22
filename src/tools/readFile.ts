@@ -107,7 +107,7 @@ export function registerReadFile(server: McpServer): void {
           };
         }
         // Binary fileRef: HTTP download.
-        const res = await olGet(`project/${ap.projectId}/file/${entity.id}`);
+        const res = await olGet(ap.baseUrl, `project/${ap.projectId}/file/${entity.id}`);
         await expectOk(res, `GET project/${ap.projectId}/file/${entity.id}`);
         const buf = Buffer.from(await res.arrayBuffer());
         const ext = entity.name.split(".").pop()?.toLowerCase() ?? "";
