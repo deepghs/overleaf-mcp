@@ -17,6 +17,8 @@ interface CaptureOpts {
   timeoutMs?: number;
 }
 
+const KNOWN_SESSION_COOKIES = ["overleaf_session2", "overleaf.sid", "sharelatex.sid"];
+
 interface Cookie {
   name: string;
   value: string;
@@ -178,8 +180,20 @@ export async function captureCookie(baseUrl: string, opts: CaptureOpts = {}): Pr
       sessionId,
     );
     const cookies = cookieRes.cookies ?? [];
-    if (!cookies.some((c) => c.name === "overleaf_session2")) {
-      throw new Error("captured page but no overleaf_session2 cookie present");
+    if (!cookies.length) {
+      throw new Error(`captured the dashboard but the browser holds no cookies for ${baseUrl}`);
+    }
+    // The session cookie's name is a deployment setting: `overleaf_session2`
+    // on overleaf.com, `overleaf.sid` on CE / Server Pro by default (older
+    // installs: `sharelatex.sid`), and whatever an admin configured. So don't
+    // insist on one name — pass every cookie for the origin through and let
+    // the /project identity check (validateCookie) be the arbiter.
+    const names = cookies.map((c) => c.name);
+    if (!names.some((n) => KNOWN_SESSION_COOKIES.includes(n))) {
+      logger.warn(
+        `no cookie with a known Overleaf session name (${KNOWN_SESSION_COOKIES.join(", ")}) among [${names.join(", ")}]; ` +
+          "passing all cookies through — the identity check decides",
+      );
     }
     const header = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
 
